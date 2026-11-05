@@ -342,13 +342,16 @@ async def daily(ctx):
     embed.set_footer(text=f"Solicitado por {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
     await ctx.send(embed=embed)
 
-# ===== COMANDO CRIAR EMBED - SÓ SLASH + SÓ ADM =====
+# ===== COMANDO CRIAR EMBED - SÓ SLASH + SÓ ADM + SEM MOSTRAR QUEM USOU =====
 
 @bot.tree.command(name="embed", description="Cria um embed personalizado (só ADM)")
 @app_commands.default_permissions(administrator=True)
 @app_commands.checks.has_permissions(administrator=True)
 @app_commands.describe(mensagem="Mensagem do embed (obrigatório)", cor="Cor: nome ou #hex. Se vazio, fica amarelo", midia="Link de imagem (opcional)")
 async def criar_embed(interaction: discord.Interaction, mensagem: str, cor: str = None, midia: str = None):
+    # Responde só pra você, invisível pros outros, pra não aparecer "Shy usou /embed"
+    await interaction.response.defer(ephemeral=True)
+
     cor_final = parse_cor(cor)
 
     embed = discord.Embed(
@@ -362,14 +365,23 @@ async def criar_embed(interaction: discord.Interaction, mensagem: str, cor: str 
         if midia.startswith("http"):
             embed.set_image(url=midia)
 
-    await interaction.response.send_message(embed=embed)
+    # Manda como mensagem normal do bot, sem o "usou /embed" em cima
+    await interaction.channel.send(embed=embed)
+    # Confirma só pra você que foi enviado
+    await interaction.followup.send("✅ Embed enviado!", ephemeral=True)
 
 @criar_embed.error
 async def criar_embed_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.errors.MissingPermissions):
-        await interaction.response.send_message("❌ Você precisa ser administrador para usar esse comando.", ephemeral=True)
+        if not interaction.response.is_done():
+            await interaction.response.send_message("❌ Você precisa ser administrador para usar esse comando.", ephemeral=True)
+        else:
+            await interaction.followup.send("❌ Você precisa ser administrador para usar esse comando.", ephemeral=True)
     else:
-        await interaction.response.send_message(f"❌ Erro: {error}", ephemeral=True)
+        if not interaction.response.is_done():
+            await interaction.response.send_message(f"❌ Erro: {error}", ephemeral=True)
+        else:
+            await interaction.followup.send(f"❌ Erro: {error}", ephemeral=True)
 
 @bot.event
 async def on_message(message):
