@@ -692,7 +692,27 @@ class TicketView(discord.ui.View):
         await interaction.response.send_modal(
             ModalMensagem(
                 self.guild_id,
-                "ticket_mensagem",
+                "ticket_mensagem",                "Mensagem do Painel"
+            )
+        )
+
+    @discord.ui.button(
+        label="Cargo Suporte",
+        style=discord.ButtonStyle.secondary,
+        emoji="🛡️",
+        row=0
+    )
+    async def cargo(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        await interaction.response.send_message(
+            "Selecione o cargo que vai ser "
+            "marcado nos tickets:",
+            view=SelectCargoView(self.guild_id),
+            ephemeral=True
+        )
     @discord.ui.button(
         label="Categoria",
         style=discord.ButtonStyle.secondary,
