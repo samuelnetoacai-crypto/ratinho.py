@@ -6,6 +6,7 @@ import os
 import json
 import random
 import time
+import re
 
 # Parte pra manter online
 app = Flask('')
@@ -277,6 +278,29 @@ async def daily(ctx):
     embed.add_field(name="Saldo atual", value=f"⚡ **{dados[uid]['volts']:,}** volts".replace(",", "."), inline=True)
     embed.add_field(name="Próximo resgate", value="Disponível em 24 horas.", inline=False)
     embed.set_footer(text=f"Solicitado por {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
+    await ctx.send(embed=embed)
+
+@bot.event
+async def on_message(message):
+    if message.author == bot.user:
+        return
+    # Só responde se a mensagem for APENAS o @ do bot, sem nenhum outro texto
+    conteudo_sem_mencao = re.sub(r"<@!?\d+>", "", message.content).strip()
+    so_marcou_bot = bot.user in message.mentions and conteudo_sem_mencao == ""
+
+    if so_marcou_bot:
+        embed = discord.Embed(
+            title="👋 Olá!",
+            description=f"{message.author.mention}, eu sou o **Ratinho**.",
+            color=COR_PRINCIPAL
+        )
+        embed.add_field(name="Prefixo", value="`v`", inline=False)
+        embed.add_field(name="Exemplo", value="`v atm` • `v daily` • `v volts pagar @usuário 100`", inline=False)
+        await message.channel.send(embed=embed)
+    await bot.process_commands(message)
+
+keep_alive()
+bot.run(os.getenv("TOKEN"))}", icon_url=ctx.author.display_avatar.url)
     await ctx.send(embed=embed)
 
 @bot.event
