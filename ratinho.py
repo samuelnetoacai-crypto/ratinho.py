@@ -300,23 +300,4 @@ async def on_message(message):
     await bot.process_commands(message)
 
 keep_alive()
-bot.run(os.getenv("TOKEN"))}", icon_url=ctx.author.display_avatar.url)
-    await ctx.send(embed=embed)
-
-@bot.event
-async def on_message(message):
-    if message.author == bot.user:
-        return
-    if bot.user.mentioned_in(message):
-        embed = discord.Embed(
-            title="👋 Olá!",
-            description=f"{message.author.mention}, eu sou o **Ratinho**.",
-            color=COR_PRINCIPAL
-        )
-        embed.add_field(name="Prefixo", value="`v`", inline=False)
-        embed.add_field(name="Exemplo", value="`v atm` • `v daily` • `v volts pagar @usuário 100`", inline=False)
-        await message.channel.send(embed=embed)
-    await bot.process_commands(message)
-
-keep_alive()
 bot.run(os.getenv("TOKEN"))
