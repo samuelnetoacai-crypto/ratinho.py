@@ -2,6 +2,7 @@ from flask import Flask
 from threading import Thread
 import discord
 from discord.ext import commands
+from discord import app_commands
 import os
 import json
 import random
@@ -85,6 +86,31 @@ def add_volts(user_id, valor):
     dados[uid]["volts"] += valor
     salvar(dados)
     return dados[uid]["volts"]
+
+def parse_cor(cor_str):
+    if not cor_str:
+        return COR_PRINCIPAL
+    cor_str = cor_str.strip().lower()
+    cores_nomes = {
+        "amarelo": 0xF1C40F,
+        "vermelho": 0xE74C3C,
+        "verde": 0x2ECC71,
+        "azul": 0x3498DB,
+        "roxo": 0x9B59B6,
+        "rosa": 0xFF6B9D,
+        "laranja": 0xE67E22,
+        "preto": 0x2C3E50,
+        "branco": 0xECF0F1,
+        "cinza": 0x95A5A6,
+        "ciano": 0x1ABC9C,
+    }
+    if cor_str in cores_nomes:
+        return cores_nomes[cor_str]
+    cor_str = cor_str.replace("#", "").replace("0x", "")
+    try:
+        return int(cor_str, 16)
+    except:
+        return COR_PRINCIPAL
 
 # Botões de aceitar / recusar o pagamento
 class ConfirmarPagamento(discord.ui.View):
@@ -315,6 +341,35 @@ async def daily(ctx):
     embed.add_field(name="Próximo resgate", value="Disponível em 24 horas.", inline=False)
     embed.set_footer(text=f"Solicitado por {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
     await ctx.send(embed=embed)
+
+# ===== COMANDO CRIAR EMBED - SÓ SLASH + SÓ ADM =====
+
+@bot.tree.command(name="embed", description="Cria um embed personalizado (só ADM)")
+@app_commands.default_permissions(administrator=True)
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(mensagem="Mensagem do embed (obrigatório)", cor="Cor: nome ou #hex. Se vazio, fica amarelo", midia="Link de imagem (opcional)")
+async def criar_embed(interaction: discord.Interaction, mensagem: str, cor: str = None, midia: str = None):
+    cor_final = parse_cor(cor)
+
+    embed = discord.Embed(
+        description=mensagem,
+        color=cor_final
+    )
+    # Sem footer, sem autor, sem mostrar quem criou
+
+    if midia:
+        midia = midia.strip()
+        if midia.startswith("http"):
+            embed.set_image(url=midia)
+
+    await interaction.response.send_message(embed=embed)
+
+@criar_embed.error
+async def criar_embed_error(interaction: discord.Interaction, error):
+    if isinstance(error, app_commands.errors.MissingPermissions):
+        await interaction.response.send_message("❌ Você precisa ser administrador para usar esse comando.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"❌ Erro: {error}", ephemeral=True)
 
 @bot.event
 async def on_message(message):
