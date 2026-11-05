@@ -7,6 +7,8 @@ import json
 import random
 import time
 import re
+import urllib.request
+import urllib.parse
 
 # Parte pra manter online
 app = Flask('')
@@ -29,18 +31,47 @@ COR_SUCESSO = 0x2ECC71
 COR_ERRO = 0xE74C3C
 COR_INFO = 0x3498DB
 
+UPSTASH_URL = os.getenv("UPSTASH_REDIS_REST_URL")
+UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN")
+
 def carregar():
-    if not os.path.exists(ARQUIVO):
-        return {}
+    if not UPSTASH_URL or not UPSTASH_TOKEN:
+        if not os.path.exists(ARQUIVO):
+            return {}
+        try:
+            with open(ARQUIVO, "r") as f:
+                return json.load(f)
+        except:
+            return {}
     try:
-        with open(ARQUIVO, "r") as f:
-            return json.load(f)
-    except:
+        req = urllib.request.Request(
+            f"{UPSTASH_URL}/get/volts_db",
+            headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as res:
+            data = json.loads(res.read())
+            if data.get("result"):
+                return json.loads(data["result"])
+            return {}
+    except Exception as e:
+        print(f"Erro ao carregar do Upstash: {e}")
         return {}
 
 def salvar(dados):
-    with open(ARQUIVO, "w") as f:
-        json.dump(dados, f, indent=4)
+    if not UPSTASH_URL or not UPSTASH_TOKEN:
+        with open(ARQUIVO, "w") as f:
+            json.dump(dados, f, indent=4)
+        return
+    try:
+        valor = json.dumps(dados)
+        req = urllib.request.Request(
+            f"{UPSTASH_URL}/set/volts_db/{urllib.parse.quote(valor)}",
+            headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"},
+            method="POST"
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        print(f"Erro ao salvar no Upstash: {e}")
 
 def get_volts(user_id):
     dados = carregar()
@@ -284,20 +315,4 @@ async def daily(ctx):
 async def on_message(message):
     if message.author == bot.user:
         return
-    # Só responde se a mensagem for APENAS o @ do bot, sem nenhum outro texto
-    conteudo_sem_mencao = re.sub(r"<@!?\d+>", "", message.content).strip()
-    so_marcou_bot = bot.user in message.mentions and conteudo_sem_mencao == ""
-
-    if so_marcou_bot:
-        embed = discord.Embed(
-            title="👋 Olá!",
-            description=f"{message.author.mention}, eu sou o Ratinho, um bot de automatização e entretenimento!",
-            color=COR_PRINCIPAL
-        )
-        embed.add_field(name="Prefixo", value="`v`", inline=False)
-        embed.add_field(name="Exemplo", value="`vatm` • `vdaily` • `vvolts pagar`", inline=False)
-        await message.channel.send(embed=embed)
-    await bot.process_commands(message)
-
-keep_alive()
-bot.run(os.getenv("TOKEN"))
+    conteudo
