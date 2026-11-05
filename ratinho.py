@@ -291,11 +291,11 @@ async def on_message(message):
     if so_marcou_bot:
         embed = discord.Embed(
             title="👋 Olá!",
-            description=f"{message.author.mention}, eu sou o **Ratinho**.",
+            description=f"{message.author.mention}, eu sou o Ratinho, um bot de automatização e entretenimento!",
             color=COR_PRINCIPAL
         )
         embed.add_field(name="Prefixo", value="`v`", inline=False)
-        embed.add_field(name="Exemplo", value="`v atm` • `v daily` • `v volts pagar @usuário 100`", inline=False)
+        embed.add_field(name="Exemplo", value="`vatm` • `vdaily` • `vvolts pagar`", inline=False)
         await message.channel.send(embed=embed)
     await bot.process_commands(message)
 
