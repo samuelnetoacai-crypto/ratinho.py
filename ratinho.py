@@ -1,3 +1,13 @@
+# ============================================================
+#  RATINHO - BOT COMPLETO
+#  1. Flask / Keep Alive
+#  2. Banco de Dados (Volts + Config)
+#  3. Helpers / Cores / Formatação
+#  4. Views: Pagamento / Configurar / Ticket
+#  5. Eventos (Logs / Entrada / Saída)
+#  6. Comandos (Volts / Configurar / Embed)
+# ============================================================
+
 from flask import Flask
 from threading import Thread
 import discord
@@ -10,8 +20,11 @@ import time
 import re
 import urllib.request
 import urllib.parse
+import asyncio
 
-# Parte pra manter online
+# ============================================================
+#  1. FLASK - MANTER ONLINE
+# ============================================================
 app = Flask('')
 
 @app.route('/')
@@ -25,16 +38,21 @@ def keep_alive():
     t = Thread(target=run, daemon=True)
     t.start()
 
-# ===== SISTEMA DE VOLTS =====
+# ============================================================
+#  2. CONFIGS GERAIS + BANCO
+# ============================================================
 ARQUIVO = "volts.json"
-COR_PRINCIPAL = 0xF1C40F
-COR_SUCESSO = 0x2ECC71
-COR_ERRO = 0xE74C3C
-COR_INFO = 0x3498DB
+ARQUIVO_CONFIG = "config.json"
+
+COR_PRINCIPAL = 0xF1C40F  # Amarelo
+COR_SUCESSO  = 0x2ECC71  # Verde
+COR_ERRO     = 0xE74C3C  # Vermelho
+COR_INFO     = 0x3498DB  # Azul
 
 UPSTASH_URL = os.getenv("UPSTASH_REDIS_REST_URL")
 UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN")
 
+# ---------- Volts ----------
 def carregar():
     if not UPSTASH_URL or not UPSTASH_TOKEN:
         if not os.path.exists(ARQUIVO):
@@ -51,9 +69,7 @@ def carregar():
         )
         with urllib.request.urlopen(req, timeout=5) as res:
             data = json.loads(res.read())
-            if data.get("result"):
-                return json.loads(data["result"])
-            return {}
+            return json.loads(data["result"]) if data.get("result") else {}
     except Exception as e:
         print(f"Erro ao carregar do Upstash: {e}")
         return {}
@@ -74,9 +90,66 @@ def salvar(dados):
     except Exception as e:
         print(f"Erro ao salvar no Upstash: {e}")
 
+# ---------- Config do Servidor ----------
+def carregar_config():
+    if not UPSTASH_URL or not UPSTASH_TOKEN:
+        if not os.path.exists(ARQUIVO_CONFIG):
+            return {}
+        try:
+            with open(ARQUIVO_CONFIG, "r") as f:
+                return json.load(f)
+        except:
+            return {}
+    try:
+        req = urllib.request.Request(
+            f"{UPSTASH_URL}/get/config_db",
+            headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as res:
+            data = json.loads(res.read())
+            return json.loads(data["result"]) if data.get("result") else {}
+    except:
+        return {}
+
+def salvar_config(dados):
+    if not UPSTASH_URL or not UPSTASH_TOKEN:
+        with open(ARQUIVO_CONFIG, "w") as f:
+            json.dump(dados, f, indent=4)
+        return
+    try:
+        valor = json.dumps(dados)
+        req = urllib.request.Request(
+            f"{UPSTASH_URL}/set/config_db/{urllib.parse.quote(valor)}",
+            headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"},
+            method="POST"
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        print(f"Erro ao salvar config: {e}")
+
+def get_guild_config(guild_id):
+    dados = carregar_config()
+    gid = str(guild_id)
+    if gid not in dados:
+        dados[gid] = {
+            "logs":    {"ativo": False, "canal": None},
+            "ticket":  {"ativo": False, "canal_painel": None, "mensagem": "Clique no botão abaixo para abrir um ticket!\nNossa equipe vai te atender o mais rápido possível.", "cargo_suporte": None, "categoria": None},
+            "entrada": {"ativo": False, "canal": None, "mensagem": "👋 {user} entrou em **{server}**!\nSeja bem-vindo(a)!"},
+            "saida":   {"ativo": False, "canal": None, "mensagem": "🚪 {user} saiu de **{server}**.\nSentiremos sua falta!"},
+        }
+        salvar_config(dados)
+    return dados[gid]
+
+def update_guild_config(guild_id, nova):
+    dados = carregar_config()
+    dados[str(guild_id)] = nova
+    salvar_config(dados)
+
+# ============================================================
+#  3. HELPERS
+# ============================================================
 def get_volts(user_id):
-    dados = carregar()
-    return dados.get(str(user_id), {}).get("volts", 0)
+    return carregar().get(str(user_id), {}).get("volts", 0)
 
 def add_volts(user_id, valor):
     dados = carregar()
@@ -91,28 +164,44 @@ def parse_cor(cor_str):
     if not cor_str:
         return COR_PRINCIPAL
     cor_str = cor_str.strip().lower()
-    cores_nomes = {
-        "amarelo": 0xF1C40F,
-        "vermelho": 0xE74C3C,
-        "verde": 0x2ECC71,
-        "azul": 0x3498DB,
-        "roxo": 0x9B59B6,
-        "rosa": 0xFF6B9D,
-        "laranja": 0xE67E22,
-        "preto": 0x2C3E50,
-        "branco": 0xECF0F1,
-        "cinza": 0x95A5A6,
-        "ciano": 0x1ABC9C,
+    nomes = {
+        "amarelo": 0xF1C40F, "vermelho": 0xE74C3C, "verde": 0x2ECC71, "azul": 0x3498DB,
+        "roxo": 0x9B59B6, "rosa": 0xFF6B9D, "laranja": 0xE67E22, "preto": 0x2C3E50,
+        "branco": 0xECF0F1, "cinza": 0x95A5A6, "ciano": 0x1ABC9C,
     }
-    if cor_str in cores_nomes:
-        return cores_nomes[cor_str]
+    if cor_str in nomes:
+        return nomes[cor_str]
     cor_str = cor_str.replace("#", "").replace("0x", "")
     try:
         return int(cor_str, 16)
     except:
         return COR_PRINCIPAL
 
-# Botões de aceitar / recusar o pagamento
+def formatar_mensagem(texto, membro, guild):
+    return (texto
+        .replace("{user}", membro.mention)
+        .replace("{usuario}", membro.mention)
+        .replace("{nome}", membro.display_name)
+        .replace("{server}", guild.name)
+        .replace("{servidor}", guild.name)
+        .replace("{membros}", str(guild.member_count)))
+
+# --- Helpers de exibição (pra não ficar feio) ---
+def status_txt(ativo: bool):
+    return "🟢 Ativo" if ativo else "🔴 Desativado"
+
+def canal_txt(canal_id):
+    return f"<#{canal_id}>" if canal_id else "`Não definido`"
+
+def cargo_txt(cargo_id):
+    return f"<@&{cargo_id}>" if cargo_id else "`Não definido`"
+
+def linha():
+    return "────────────────────"
+
+# ============================================================
+#  4. VIEWS
+# ============================================================
 class ConfirmarPagamento(discord.ui.View):
     def __init__(self, pagador, recebedor, valor):
         super().__init__(timeout=60)
@@ -139,268 +228,244 @@ class ConfirmarPagamento(discord.ui.View):
         self.stop()
         await interaction.response.defer()
 
-# Parte do bot
+# ============================================================
+#  BOT
+# ============================================================
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-
 bot = commands.Bot(command_prefix="v", intents=intents)
 
-@bot.event
-async def on_ready():
-    print(f"Logado como {bot.user}")
-    try:
-        synced = await bot.tree.sync()
-        print(f"Sincronizados {len(synced)} comandos slash!")
-    except Exception as e:
-        print(f"Erro ao sincronizar slash: {e}")
-    await bot.change_presence(
-        status=discord.Status.idle,
-        activity=discord.CustomActivity(
-            name=f"Atualmente estou em {len(bot.guilds)} servidores!"
-        )
+# ============================================================
+#  EMBEDS DO PAINEL CONFIGURAR - ORGANIZADOS
+# ============================================================
+def embed_painel_principal(guild, guild_id):
+    cfg = get_guild_config(guild_id)
+    e = discord.Embed(
+        title="⚙️  Painel de Configuração",
+        description="Configure as funções do Ratinho neste servidor.\nEscolha uma opção abaixo:",
+        color=COR_PRINCIPAL
     )
-
-@bot.event
-async def on_guild_join(guild):
-    await bot.change_presence(
-        status=discord.Status.idle,
-        activity=discord.CustomActivity(
-            name=f"Atualmente estou em {len(bot.guilds)} servidores!"
-        )
+    if guild.icon:
+        e.set_thumbnail(url=guild.icon.url)
+    e.add_field(
+        name="📋  Events Logs",
+        value=f"{status_txt(cfg['logs']['ativo'])}\n"
+              f"**Canal:** {canal_txt(cfg['logs']['canal'])}\n"
+              f"Registra mensagens, entradas, saídas, bans e mais.",
+        inline=True
     )
-
-@bot.event
-async def on_guild_remove(guild):
-    await bot.change_presence(
-        status=discord.Status.idle,
-        activity=discord.CustomActivity(
-            name=f"Atualmente estou em {len(bot.guilds)} servidores!"
-        )
+    e.add_field(
+        name="🎫  Ticket",
+        value=f"{status_txt(cfg['ticket']['ativo'])}\n"
+              f"**Painel:** {canal_txt(cfg['ticket']['canal_painel'])}\n"
+              f"Sistema de atendimento por tickets.",
+        inline=True
     )
-
-# ===== COMANDOS DE VOLTS =====
-
-@bot.hybrid_command(name="atm", description="Consulta o saldo de volts")
-async def atm(ctx, membro: discord.Member = None):
-    if membro is None:
-        membro = ctx.author
-    saldo = get_volts(membro.id)
-
-    embed = discord.Embed(
-        title="🏦 Banco Volts",
-        description=f"Saldo atual de **{membro.display_name}**",
-        color=COR_PRINCIPAL,
-        timestamp=discord.utils.utcnow()
+    e.add_field(
+        name="👋  Mensagem de Entradas",
+        value=f"{status_txt(cfg['entrada']['ativo'])}\n"
+              f"**Canal:** {canal_txt(cfg['entrada']['canal'])}\n"
+              f"Boas-vindas quando alguém entra.",
+        inline=True
     )
-    embed.set_thumbnail(url=membro.display_avatar.url)
-    embed.add_field(name="⚡ Volts", value=f"**{saldo:,}** volts".replace(",", "."), inline=False)
-    embed.set_footer(text=f"Solicitado por {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
-    await ctx.send(embed=embed)
-
-@bot.hybrid_group(name="volts", description="Sistema Volts", invoke_without_command=True)
-async def volts_group(ctx):
-    embed = discord.Embed(
-        title="⚡ Sistema Volts",
-        description="Comandos disponíveis:",
-        color=COR_INFO
+    e.add_field(
+        name="🚪  Mensagem de Saídas",
+        value=f"{status_txt(cfg['saida']['ativo'])}\n"
+              f"**Canal:** {canal_txt(cfg['saida']['canal'])}\n"
+              f"Despedida quando alguém sai.",
+        inline=True
     )
-    embed.add_field(name="v volts pagar", value="`v volts pagar @usuário <valor>`\nRealiza uma transferência com confirmação.", inline=False)
-    embed.add_field(name="v atm", value="`v atm` ou `v atm @usuário`\nConsulta o saldo de volts.", inline=False)
-    embed.add_field(name="v daily", value="`v daily`\nResgata sua recompensa diária.", inline=False)
-    embed.set_footer(text=f"Solicitado por {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
-    await ctx.send(embed=embed)
+    e.set_footer(text=f"{guild.name}  •  Painel de Configuração")
+    return e
 
-@volts_group.command(name="pagar", description="Realiza uma transferência com confirmação")
-async def volts_pagar(ctx, membro: discord.Member = None, valor: int = None):
-    if membro is None or valor is None:
-        embed = discord.Embed(
-            title="⚠️ Uso incorreto",
-            description="Utilize o comando da seguinte forma:",
-            color=COR_ERRO
-        )
-        embed.add_field(name="Formato", value="`v volts pagar @usuário <valor>`", inline=False)
-        embed.add_field(name="Exemplo", value="`v volts pagar @Shy 500`", inline=False)
-        await ctx.send(embed=embed)
-        return
-
-    if membro.id == ctx.author.id:
-        embed = discord.Embed(
-            title="⚠️ Transferência inválida",
-            description="Você não pode realizar uma transferência para si mesmo.",
-            color=COR_ERRO
-        )
-        await ctx.send(embed=embed)
-        return
-
-    if valor <= 0:
-        embed = discord.Embed(
-            title="⚠️ Valor inválido",
-            description="O valor da transferência deve ser maior que zero.",
-            color=COR_ERRO
-        )
-        await ctx.send(embed=embed)
-        return
-
-    saldo = get_volts(ctx.author.id)
-    if saldo < valor:
-        embed = discord.Embed(
-            title="❌ Saldo insuficiente",
-            description="Você não possui volts suficientes para concluir esta transferência.",
-            color=COR_ERRO
-        )
-        embed.add_field(name="Seu saldo", value=f"⚡ **{saldo:,}** volts".replace(",", "."), inline=True)
-        embed.add_field(name="Valor solicitado", value=f"⚡ **{valor:,}** volts".replace(",", "."), inline=True)
-        await ctx.send(embed=embed)
-        return
-
-    view = ConfirmarPagamento(ctx.author, membro, valor)
-    embed = discord.Embed(
-        title="💸 Solicitação de Transferência",
-        description=f"{membro.mention}, você recebeu uma solicitação de transferência.",
-        color=COR_INFO
+def embed_logs(guild_id):
+    cfg = get_guild_config(guild_id)["logs"]
+    e = discord.Embed(
+        title="📋  Events Logs",
+        description="Configure onde os logs do servidor vão aparecer.",
+        color=COR_PRINCIPAL
     )
-    embed.add_field(name="Remetente", value=ctx.author.mention, inline=True)
-    embed.add_field(name="Destinatário", value=membro.mention, inline=True)
-    embed.add_field(name="Valor", value=f"⚡ **{valor:,}** volts".replace(",", "."), inline=False)
-    embed.set_footer(text="Você possui 60 segundos para responder.")
-    msg = await ctx.send(embed=embed, view=view)
-    await view.wait()
-
-    if view.resultado is None:
-        embed_timeout = discord.Embed(
-            title="⏰ Tempo esgotado",
-            description="A solicitação de transferência expirou e foi cancelada automaticamente.",
-            color=COR_ERRO
-        )
-        await msg.edit(embed=embed_timeout, view=None)
-        return
-
-    if view.resultado is False:
-        embed_recusado = discord.Embed(
-            title="❌ Transferência recusada",
-            description=f"{membro.mention} recusou a transferência.",
-            color=COR_ERRO
-        )
-        embed_recusado.add_field(name="Valor", value=f"⚡ **{valor:,}** volts".replace(",", "."), inline=False)
-        await msg.edit(embed=embed_recusado, view=None)
-        return
-
-    add_volts(ctx.author.id, -valor)
-    add_volts(membro.id, valor)
-    novo_saldo_pagador = get_volts(ctx.author.id)
-    novo_saldo_recebedor = get_volts(membro.id)
-
-    embed_sucesso = discord.Embed(
-        title="✅ Transferência concluída",
-        description="A transferência foi confirmada com sucesso.",
-        color=COR_SUCESSO
+    e.add_field(name="Status", value=status_txt(cfg["ativo"]), inline=True)
+    e.add_field(name="Canal", value=canal_txt(cfg["canal"]), inline=True)
+    e.add_field(
+        name="📌  O que é registrado",
+        value="• Mensagem apagada / editada\n• Membro entrou / saiu\n• Membro banido / desbanido",
+        inline=False
     )
-    embed_sucesso.add_field(name="Remetente", value=f"{ctx.author.mention}\nSaldo atual: ⚡ **{novo_saldo_pagador:,}** volts".replace(",", "."), inline=True)
-    embed_sucesso.add_field(name="Destinatário", value=f"{membro.mention}\nSaldo atual: ⚡ **{novo_saldo_recebedor:,}** volts".replace(",", "."), inline=True)
-    embed_sucesso.add_field(name="Valor transferido", value=f"⚡ **{valor:,}** volts".replace(",", "."), inline=False)
-    await msg.edit(embed=embed_sucesso, view=None)
+    e.set_footer(text="Events Logs  •  Ratinho")
+    return e
 
-@bot.hybrid_command(name="daily", description="Resgata sua recompensa diária")
-async def daily(ctx):
-    dados = carregar()
-    uid = str(ctx.author.id)
-    agora = time.time()
+def embed_ticket(guild_id):
+    cfg = get_guild_config(guild_id)["ticket"]
+    e = discord.Embed(
+        title="🎫  Ticket",
+        description="Configure o sistema de tickets do servidor.",
+        color=COR_PRINCIPAL
+    )
+    e.add_field(name="Status", value=status_txt(cfg["ativo"]), inline=True)
+    e.add_field(name="Canal do Painel", value=canal_txt(cfg["canal_painel"]), inline=True)
+    e.add_field(name="Cargo Suporte", value=cargo_txt(cfg["cargo_suporte"]), inline=True)
+    e.add_field(name="Categoria", value=canal_txt(cfg["categoria"]), inline=True)
+    e.add_field(name="💬  Mensagem do Painel", value=cfg["mensagem"][:1000], inline=False)
+    e.set_footer(text="Ticket  •  Ratinho")
+    return e
 
-    if uid not in dados:
-        dados[uid] = {"volts": 0, "last_daily": 0}
+def embed_entrada_saida(guild_id, tipo):
+    cfg = get_guild_config(guild_id)[tipo]
+    is_entrada = tipo == "entrada"
+    titulo = "👋  Mensagem de Entradas" if is_entrada else "🚪  Mensagem de Saídas"
+    desc = "Configure a mensagem de boas-vindas." if is_entrada else "Configure a mensagem de despedida."
+    e = discord.Embed(title=titulo, description=desc, color=COR_PRINCIPAL)
+    e.add_field(name="Status", value=status_txt(cfg["ativo"]), inline=True)
+    e.add_field(name="Canal", value=canal_txt(cfg["canal"]), inline=True)
+    e.add_field(name="💬  Mensagem atual", value=cfg["mensagem"][:1000], inline=False)
+    e.add_field(
+        name="🔧  Variáveis disponíveis",
+        value="`{user}`  •  menciona o membro\n`{nome}`  •  nome do membro\n`{server}`  •  nome do servidor\n`{membros}`  •  total de membros",
+        inline=False
+    )
+    e.set_footer(text=f"{titulo}  •  Ratinho")
+    return e
 
-    ultimo = dados[uid].get("last_daily", 0)
-    falta = 86400 - (agora - ultimo)
-
-    if falta > 0:
-        horas = int(falta // 3600)
-        minutos = int((falta % 3600) // 60)
-        embed = discord.Embed(
-            title="⏰ Recompensa diária indisponível",
-            description="Você já resgatou sua recompensa diária.",
-            color=COR_ERRO
+# ---------- Modals ----------
+class ModalMensagem(discord.ui.Modal):
+    def __init__(self, guild_id, tipo, titulo):
+        super().__init__(title=titulo)
+        self.guild_id = guild_id
+        self.tipo = tipo
+        cfg = get_guild_config(guild_id)
+        atual = cfg["ticket"]["mensagem"] if tipo == "ticket_mensagem" else cfg[tipo]["mensagem"]
+        self.msg = discord.ui.TextInput(
+            label="Mensagem", style=discord.TextStyle.paragraph,
+            placeholder="Digite a mensagem...", default=atual,
+            max_length=1500, required=True
         )
-        embed.add_field(name="Próximo resgate em", value=f"**{horas}h {minutos}min**", inline=False)
-        embed.set_footer(text=f"Solicitado por {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
-        await ctx.send(embed=embed)
-        return
+        self.add_item(self.msg)
 
-    ganho = random.randint(2000, 5000)
-    dados[uid]["volts"] += ganho
-    dados[uid]["last_daily"] = agora
-    salvar(dados)
-
-    embed = discord.Embed(
-        title="🎉 Recompensa Diária Resgatada",
-        description=f"Parabéns, {ctx.author.mention}!",
-        color=COR_SUCESSO
-    )
-    embed.add_field(name="Valor recebido", value=f"⚡ **{ganho:,}** volts".replace(",", "."), inline=True)
-    embed.add_field(name="Saldo atual", value=f"⚡ **{dados[uid]['volts']:,}** volts".replace(",", "."), inline=True)
-    embed.add_field(name="Próximo resgate", value="Disponível em 24 horas.", inline=False)
-    embed.set_footer(text=f"Solicitado por {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
-    await ctx.send(embed=embed)
-
-# ===== COMANDO CRIAR EMBED - SÓ SLASH + SÓ ADM + SEM MOSTRAR QUEM USOU =====
-
-@bot.tree.command(name="embed", description="Cria um embed personalizado (só ADM)")
-@app_commands.default_permissions(administrator=True)
-@app_commands.checks.has_permissions(administrator=True)
-@app_commands.describe(mensagem="Mensagem do embed (obrigatório)", cor="Cor: nome ou #hex. Se vazio, fica amarelo", midia="Link de imagem (opcional)")
-async def criar_embed(interaction: discord.Interaction, mensagem: str, cor: str = None, midia: str = None):
-    # Responde só pra você, invisível pros outros, pra não aparecer "Shy usou /embed"
-    await interaction.response.defer(ephemeral=True)
-
-    cor_final = parse_cor(cor)
-
-    embed = discord.Embed(
-        description=mensagem,
-        color=cor_final
-    )
-    # Sem footer, sem autor, sem mostrar quem criou
-
-    if midia:
-        midia = midia.strip()
-        if midia.startswith("http"):
-            embed.set_image(url=midia)
-
-    # Manda como mensagem normal do bot, sem o "usou /embed" em cima
-    await interaction.channel.send(embed=embed)
-    # Confirma só pra você que foi enviado
-    await interaction.followup.send("✅ Embed enviado!", ephemeral=True)
-
-@criar_embed.error
-async def criar_embed_error(interaction: discord.Interaction, error):
-    if isinstance(error, app_commands.errors.MissingPermissions):
-        if not interaction.response.is_done():
-            await interaction.response.send_message("❌ Você precisa ser administrador para usar esse comando.", ephemeral=True)
+    async def on_submit(self, interaction: discord.Interaction):
+        cfg = get_guild_config(self.guild_id)
+        if self.tipo == "ticket_mensagem":
+            cfg["ticket"]["mensagem"] = self.msg.value
         else:
-            await interaction.followup.send("❌ Você precisa ser administrador para usar esse comando.", ephemeral=True)
-    else:
-        if not interaction.response.is_done():
-            await interaction.response.send_message(f"❌ Erro: {error}", ephemeral=True)
-        else:
-            await interaction.followup.send(f"❌ Erro: {error}", ephemeral=True)
+            cfg[self.tipo]["mensagem"] = self.msg.value
+        update_guild_config(self.guild_id, cfg)
+        await interaction.response.send_message("✅ Mensagem salva!", ephemeral=True)
 
-@bot.event
-async def on_message(message):
-    if message.author == bot.user:
-        return
-    # Só responde se a mensagem for APENAS o @ do bot, sem nenhum outro texto
-    conteudo_sem_mencao = re.sub(r"<@!?\d+>", "", message.content).strip()
-    so_marcou_bot = bot.user in message.mentions and conteudo_sem_mencao == ""
+# ---------- Selects ----------
+class SelectCanalView(discord.ui.View):
+    def __init__(self, guild_id, destino, tipo_canal="text"):
+        super().__init__(timeout=60)
+        self.guild_id = guild_id
+        self.destino = destino
+        tipos = [discord.ChannelType.text] if tipo_canal == "text" else [discord.ChannelType.category]
+        sel = discord.ui.ChannelSelect(placeholder="Selecione o canal", channel_types=tipos, min_values=1, max_values=1)
+        sel.callback = self.salvar_canal
+        self.add_item(sel)
 
-    if so_marcou_bot:
-        embed = discord.Embed(
-            title="👋 Olá!",
-            description=f"{message.author.mention}, eu sou o **Ratinho**.",
-            color=COR_PRINCIPAL
-        )
-        embed.add_field(name="Prefixo", value="`v`", inline=False)
-        embed.add_field(name="Exemplo", value="`v atm` • `v daily` • `v volts pagar @usuário 100`", inline=False)
-        await message.channel.send(embed=embed)
-    await bot.process_commands(message)
+    async def salvar_canal(self, interaction: discord.Interaction):
+        canal = interaction.data["values"][0]
+        cfg = get_guild_config(self.guild_id)
+        if self.destino == "logs":
+            cfg["logs"]["canal"] = int(canal)
+        elif self.destino == "ticket_painel":
+            cfg["ticket"]["canal_painel"] = int(canal)
+        elif self.destino == "ticket_categoria":
+            cfg["ticket"]["categoria"] = int(canal)
+        elif self.destino in ["entrada", "saida"]:
+            cfg[self.destino]["canal"] = int(canal)
+        update_guild_config(self.guild_id, cfg)
+        await interaction.response.send_message(f"✅ Canal salvo: <#{canal}>", ephemeral=True)
 
-keep_alive()
-bot.run(os.getenv("TOKEN"))
+class SelectCargoView(discord.ui.View):
+    def __init__(self, guild_id):
+        super().__init__(timeout=60)
+        self.guild_id = guild_id
+        sel = discord.ui.RoleSelect(placeholder="Selecione o cargo suporte", min_values=1, max_values=1)
+        sel.callback = self.salvar_cargo
+        self.add_item(sel)
+
+    async def salvar_cargo(self, interaction: discord.Interaction):
+        cargo = interaction.data["values"][0]
+        cfg = get_guild_config(self.guild_id)
+        cfg["ticket"]["cargo_suporte"] = int(cargo)
+        update_guild_config(self.guild_id, cfg)
+        await interaction.response.send_message(f"✅ Cargo suporte salvo: <@&{cargo}>", ephemeral=True)
+
+# ---------- Views do Painel (botões organizados em fileiras) ----------
+class LogsView(discord.ui.View):
+    def __init__(self, guild_id):
+        super().__init__(timeout=300)
+        self.guild_id = guild_id
+
+    @discord.ui.button(label="Canal de Logs", style=discord.ButtonStyle.secondary, emoji="📋", row=0)
+    async def canal(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Selecione o canal de logs:", view=SelectCanalView(self.guild_id, "logs"), ephemeral=True)
+
+    @discord.ui.button(label="Ativar / Desativar", style=discord.ButtonStyle.secondary, emoji="🔄", row=0)
+    async def toggle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cfg = get_guild_config(self.guild_id)
+        cfg["logs"]["ativo"] = not cfg["logs"]["ativo"]
+        update_guild_config(self.guild_id, cfg)
+        await interaction.response.edit_message(embed=embed_logs(self.guild_id), view=self)
+
+    @discord.ui.button(label="Voltar", style=discord.ButtonStyle.secondary, emoji="⬅️", row=1)
+    async def voltar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=embed_painel_principal(interaction.guild, self.guild_id), view=PainelConfigView(self.guild_id))
+
+class TicketView(discord.ui.View):
+    def __init__(self, guild_id):
+        super().__init__(timeout=300)
+        self.guild_id = guild_id
+
+    @discord.ui.button(label="Canal do Painel", style=discord.ButtonStyle.secondary, emoji="📢", row=0)
+    async def canal_painel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Selecione o canal onde vai o painel:", view=SelectCanalView(self.guild_id, "ticket_painel"), ephemeral=True)
+
+    @discord.ui.button(label="Mensagem do Painel", style=discord.ButtonStyle.secondary, emoji="💬", row=0)
+    async def msg_painel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ModalMensagem(self.guild_id, "ticket_mensagem", "Mensagem do Painel"))
+
+    @discord.ui.button(label="Cargo Suporte", style=discord.ButtonStyle.secondary, emoji="🛡️", row=0)
+    async def cargo(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Selecione o cargo que vai ser marcado nos tickets:", view=SelectCargoView(self.guild_id), ephemeral=True)
+
+    @discord.ui.button(label="Categoria", style=discord.ButtonStyle.secondary, emoji="📁", row=1)
+    async def categoria(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Selecione a categoria onde os tickets vão ser criados:", view=SelectCanalView(self.guild_id, "ticket_categoria", "category"), ephemeral=True)
+
+    @discord.ui.button(label="Enviar Painel", style=discord.ButtonStyle.secondary, emoji="📤", row=1)
+    async def enviar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cfg = get_guild_config(self.guild_id)
+        if not cfg["ticket"]["canal_painel"]:
+            await interaction.response.send_message("❌ Defina o canal do painel primeiro!", ephemeral=True)
+            return
+        canal = interaction.guild.get_channel(cfg["ticket"]["canal_painel"])
+        if not canal:
+            await interaction.response.send_message("❌ Canal não encontrado!", ephemeral=True)
+            return
+        embed = discord.Embed(title="🎫  Central de Atendimento", description=cfg["ticket"]["mensagem"], color=COR_PRINCIPAL)
+        embed.set_footer(text="Clique no botão abaixo para abrir um ticket")
+        await canal.send(embed=embed, view=TicketAbrirView())
+        await interaction.response.send_message(f"✅ Painel enviado em {canal.mention}!", ephemeral=True)
+
+    @discord.ui.button(label="Ativar / Desativar", style=discord.ButtonStyle.secondary, emoji="🔄", row=1)
+    async def toggle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cfg = get_guild_config(self.guild_id)
+        cfg["ticket"]["ativo"] = not cfg["ticket"]["ativo"]
+        update_guild_config(self.guild_id, cfg)
+        await interaction.response.edit_message(embed=embed_ticket(self.guild_id), view=self)
+
+    @discord.ui.button(label="Voltar", style=discord.ButtonStyle.secondary, emoji="⬅️", row=2)
+    async def voltar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=embed_painel_principal(interaction.guild, self.guild_id), view=PainelConfigView(self.guild_id))
+
+class EntradaSaidaView(discord.ui.View):
+    def __init__(self, guild_id, tipo):
+        super().__init__(timeout=300)
+        self.guild_id = guild_id
+        self.tipo = tipo
+
+    @discord.ui.button(label="Canal", style=discord.ButtonStyle.secondary, emoji="📢", row=0)
+    async def canal(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Selecione o canal
