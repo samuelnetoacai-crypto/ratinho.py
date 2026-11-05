@@ -58,7 +58,7 @@ async def on_message(message):
     if message.author == bot.user:
         return
     if bot.user.mentioned_in(message):
-        await message.channel.send(f"Olá {message.author.mention}! Eu sou o Ratinho e meu prefixo é v")
+        await message.channel.send(f"**Oiê {message.author.mention}! Eu sou o Ratinho e meu prefixo é "v"!**")
     await bot.process_commands(message)
 
 keep_alive()
