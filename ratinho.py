@@ -28,7 +28,30 @@ bot = commands.Bot(command_prefix="v", intents=intents)
 @bot.event
 async def on_ready():
     print(f"Logado como {bot.user}")
-    await bot.change_presence(status=discord.Status.idle)
+    await bot.change_presence(
+        status=discord.Status.idle,
+        activity=discord.CustomActivity(
+            name=f"Atualmente estou em {len(bot.guilds)} servidores!"
+        )
+    )
+
+@bot.event
+async def on_guild_join(guild):
+    await bot.change_presence(
+        status=discord.Status.idle,
+        activity=discord.CustomActivity(
+            name=f"Atualmente estou em {len(bot.guilds)} servidores!"
+        )
+    )
+
+@bot.event
+async def on_guild_remove(guild):
+    await bot.change_presence(
+        status=discord.Status.idle,
+        activity=discord.CustomActivity(
+            name=f"Atualmente estou em {len(bot.guilds)} servidores!"
+        )
+    )
 
 @bot.event
 async def on_message(message):
