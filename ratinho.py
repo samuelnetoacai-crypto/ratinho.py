@@ -1,13 +1,7 @@
 # ============================================================
 #  RATINHO - BOT COMPLETO
-#  1. Flask / Keep Alive
-#  2. Banco de Dados (Volts + Config)
-#  3. Helpers / Cores / Formatação
-#  4. Views: Pagamento / Configurar / Ticket
-#  5. Eventos (Logs / Entrada / Saída)
-#  6. Comandos (Volts / Configurar / Embed)
+#  Volts + Configurar + Ticket + Logs + Entrada/Saida + Embed
 # ============================================================
-
 from flask import Flask
 from threading import Thread
 import discord
@@ -39,20 +33,18 @@ def keep_alive():
     t.start()
 
 # ============================================================
-#  2. CONFIGS GERAIS + BANCO
+#  2. BANCO - VOLTS + CONFIG
 # ============================================================
 ARQUIVO = "volts.json"
 ARQUIVO_CONFIG = "config.json"
-
-COR_PRINCIPAL = 0xF1C40F  # Amarelo
-COR_SUCESSO  = 0x2ECC71  # Verde
-COR_ERRO     = 0xE74C3C  # Vermelho
-COR_INFO     = 0x3498DB  # Azul
+COR_PRINCIPAL = 0xF1C40F
+COR_SUCESSO = 0x2ECC71
+COR_ERRO = 0xE74C3C
+COR_INFO = 0x3498DB
 
 UPSTASH_URL = os.getenv("UPSTASH_REDIS_REST_URL")
 UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN")
 
-# ---------- Volts ----------
 def carregar():
     if not UPSTASH_URL or not UPSTASH_TOKEN:
         if not os.path.exists(ARQUIVO):
@@ -90,7 +82,6 @@ def salvar(dados):
     except Exception as e:
         print(f"Erro ao salvar no Upstash: {e}")
 
-# ---------- Config do Servidor ----------
 def carregar_config():
     if not UPSTASH_URL or not UPSTASH_TOKEN:
         if not os.path.exists(ARQUIVO_CONFIG):
@@ -132,10 +123,10 @@ def get_guild_config(guild_id):
     gid = str(guild_id)
     if gid not in dados:
         dados[gid] = {
-            "logs":    {"ativo": False, "canal": None},
-            "ticket":  {"ativo": False, "canal_painel": None, "mensagem": "Clique no botão abaixo para abrir um ticket!\nNossa equipe vai te atender o mais rápido possível.", "cargo_suporte": None, "categoria": None},
+            "logs": {"ativo": False, "canal": None},
+            "ticket": {"ativo": False, "canal_painel": None, "mensagem": "Clique no botão abaixo para abrir um ticket!\nNossa equipe vai te atender o mais rápido possível.", "cargo_suporte": None, "categoria": None},
             "entrada": {"ativo": False, "canal": None, "mensagem": "👋 {user} entrou em **{server}**!\nSeja bem-vindo(a)!"},
-            "saida":   {"ativo": False, "canal": None, "mensagem": "🚪 {user} saiu de **{server}**.\nSentiremos sua falta!"},
+            "saida": {"ativo": False, "canal": None, "mensagem": "🚪 {user} saiu de **{server}**.\nSentiremos sua falta!"},
         }
         salvar_config(dados)
     return dados[gid]
@@ -186,21 +177,24 @@ def formatar_mensagem(texto, membro, guild):
         .replace("{servidor}", guild.name)
         .replace("{membros}", str(guild.member_count)))
 
-# --- Helpers de exibição (pra não ficar feio) ---
-def status_txt(ativo: bool):
+def status_txt(ativo):
     return "🟢 Ativo" if ativo else "🔴 Desativado"
 
 def canal_txt(canal_id):
-    return f"<#{canal_id}>" if canal_id else "`Não definido`"
+    if canal_id:
+        return "<#" + str(canal_id) + ">"
+    return "`Não definido`"
 
 def cargo_txt(cargo_id):
-    return f"<@&{cargo_id}>" if cargo_id else "`Não definido`"
+    if cargo_id:
+        return "<@&" + str(cargo_id) + ">"
+    return "`Não definido`"
 
-def linha():
-    return "────────────────────"
+def fmt_volts(valor):
+    return f"**{valor:,}** volts".replace(",", ".")
 
 # ============================================================
-#  4. VIEWS
+#  4. VIEW - PAGAMENTO
 # ============================================================
 class ConfirmarPagamento(discord.ui.View):
     def __init__(self, pagador, recebedor, valor):
@@ -237,7 +231,7 @@ intents.members = True
 bot = commands.Bot(command_prefix="v", intents=intents)
 
 # ============================================================
-#  EMBEDS DO PAINEL CONFIGURAR - ORGANIZADOS
+#  EMBEDS DO CONFIGURAR - ORGANIZADO
 # ============================================================
 def embed_painel_principal(guild, guild_id):
     cfg = get_guild_config(guild_id)
@@ -250,30 +244,22 @@ def embed_painel_principal(guild, guild_id):
         e.set_thumbnail(url=guild.icon.url)
     e.add_field(
         name="📋  Events Logs",
-        value=f"{status_txt(cfg['logs']['ativo'])}\n"
-              f"**Canal:** {canal_txt(cfg['logs']['canal'])}\n"
-              f"Registra mensagens, entradas, saídas, bans e mais.",
+        value=status_txt(cfg["logs"]["ativo"]) + "\n**Canal:** " + canal_txt(cfg["logs"]["canal"]) + "\nRegistra mensagens, entradas, saídas, bans e mais.",
         inline=True
     )
     e.add_field(
         name="🎫  Ticket",
-        value=f"{status_txt(cfg['ticket']['ativo'])}\n"
-              f"**Painel:** {canal_txt(cfg['ticket']['canal_painel'])}\n"
-              f"Sistema de atendimento por tickets.",
+        value=status_txt(cfg["ticket"]["ativo"]) + "\n**Painel:** " + canal_txt(cfg["ticket"]["canal_painel"]) + "\nSistema de atendimento por tickets.",
         inline=True
     )
     e.add_field(
         name="👋  Mensagem de Entradas",
-        value=f"{status_txt(cfg['entrada']['ativo'])}\n"
-              f"**Canal:** {canal_txt(cfg['entrada']['canal'])}\n"
-              f"Boas-vindas quando alguém entra.",
+        value=status_txt(cfg["entrada"]["ativo"]) + "\n**Canal:** " + canal_txt(cfg["entrada"]["canal"]) + "\nBoas-vindas quando alguém entra.",
         inline=True
     )
     e.add_field(
         name="🚪  Mensagem de Saídas",
-        value=f"{status_txt(cfg['saida']['ativo'])}\n"
-              f"**Canal:** {canal_txt(cfg['saida']['canal'])}\n"
-              f"Despedida quando alguém sai.",
+        value=status_txt(cfg["saida"]["ativo"]) + "\n**Canal:** " + canal_txt(cfg["saida"]["canal"]) + "\nDespedida quando alguém sai.",
         inline=True
     )
     e.set_footer(text=f"{guild.name}  •  Painel de Configuração")
@@ -328,7 +314,6 @@ def embed_entrada_saida(guild_id, tipo):
     e.set_footer(text=f"{titulo}  •  Ratinho")
     return e
 
-# ---------- Modals ----------
 class ModalMensagem(discord.ui.Modal):
     def __init__(self, guild_id, tipo, titulo):
         super().__init__(title=titulo)
@@ -352,7 +337,6 @@ class ModalMensagem(discord.ui.Modal):
         update_guild_config(self.guild_id, cfg)
         await interaction.response.send_message("✅ Mensagem salva!", ephemeral=True)
 
-# ---------- Selects ----------
 class SelectCanalView(discord.ui.View):
     def __init__(self, guild_id, destino, tipo_canal="text"):
         super().__init__(timeout=60)
@@ -392,7 +376,6 @@ class SelectCargoView(discord.ui.View):
         update_guild_config(self.guild_id, cfg)
         await interaction.response.send_message(f"✅ Cargo suporte salvo: <@&{cargo}>", ephemeral=True)
 
-# ---------- Views do Painel (botões organizados em fileiras) ----------
 class LogsView(discord.ui.View):
     def __init__(self, guild_id):
         super().__init__(timeout=300)
@@ -468,4 +451,11 @@ class EntradaSaidaView(discord.ui.View):
 
     @discord.ui.button(label="Canal", style=discord.ButtonStyle.secondary, emoji="📢", row=0)
     async def canal(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("Selecione o canal
+        await interaction.response.send_message("Selecione o canal:", view=SelectCanalView(self.guild_id, self.tipo), ephemeral=True)
+
+    @discord.ui.button(label="Mensagem", style=discord.ButtonStyle.secondary, emoji="💬", row=0)
+    async def msg(self, interaction: discord.Interaction, button: discord.ui.Button):
+        titulo = "Mensagem de Entrada" if self.tipo == "entrada" else "Mensagem de Saída"
+        await interaction.response.send_modal(ModalMensagem(self.guild_id, self.tipo, titulo))
+
+    @discord.ui.button(label="Ativar / Desativar", style=discord.ButtonStyle.secondary, e
