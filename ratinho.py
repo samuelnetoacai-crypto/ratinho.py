@@ -18,10 +18,10 @@ def home():
     return "Ratinho ta online!"
 
 def run():
-    app.run(host='0.0.0.0', port=8080)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
 
 def keep_alive():
-    t = Thread(target=run)
+    t = Thread(target=run, daemon=True)
     t.start()
 
 # ===== SISTEMA DE VOLTS =====
@@ -315,4 +315,19 @@ async def daily(ctx):
 async def on_message(message):
     if message.author == bot.user:
         return
-    conteudo
+    conteudo_sem_mencao = re.sub(r"<@!?\d+>", "", message.content).strip()
+    so_marcou_bot = bot.user in message.mentions and conteudo_sem_mencao == ""
+
+    if so_marcou_bot:
+        embed = discord.Embed(
+            title="👋 Olá!",
+            description=f"{message.author.mention}, eu sou o **Ratinho**.",
+            color=COR_PRINCIPAL
+        )
+        embed.add_field(name="Prefixo", value="`v`", inline=False)
+        embed.add_field(name="Exemplo", value="`v atm` • `v daily` • `v volts pagar @usuário 100`", inline=False)
+        await message.channel.send(embed=embed)
+    await bot.process_commands(message)
+
+keep_alive()
+bot.run(os.getenv("TOKEN"))
