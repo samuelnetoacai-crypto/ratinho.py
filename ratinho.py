@@ -22,6 +22,7 @@ import urllib.request
 import urllib.parse
 import asyncio
 import uuid
+from datetime import timedelta
 
 # ============================================================
 #  1. FLASK - MANTER ONLINE
@@ -174,7 +175,9 @@ def get_guild_config(guild_id):
                     "👋 {user} entrou em "
                     "**{server}**!\n"
                     "Seja bem-vindo(a)!"
-                )
+                ),
+                "cor": "verde",
+                "imagem": None
             },
             "saida": {
                 "ativo": False,
@@ -183,11 +186,19 @@ def get_guild_config(guild_id):
                     "🚪 {user} saiu de "
                     "**{server}**.\n"
                     "Sentiremos sua falta!"
-                )
+                ),
+                "cor": "vermelho",
+                "imagem": None
             },
         }
         salvar_config(dados)
 
+    dados[gid].setdefault("entrada", {}).setdefault("cor", "verde")
+    dados[gid]["entrada"].setdefault("imagem", None)
+    dados[gid].setdefault("saida", {}).setdefault("cor", "vermelho")
+    dados[gid]["saida"].setdefault("imagem", None)
+    dados[gid].setdefault("ticket", {}).setdefault("cor", "amarelo")
+    dados[gid]["ticket"].setdefault("imagem", None)
     ticket_cfg = dados[gid].setdefault("ticket", {})
     ticket_cfg.setdefault("botoes", [{
         "id": "suporte", "nome": "Suporte", "cor": "azul",
@@ -349,11 +360,10 @@ bot = commands.Bot(
 def embed_painel_principal(guild, guild_id):
     cfg = get_guild_config(guild_id)
     e = discord.Embed(
-        title="⚙️  Painel de Configuração",
+        title="⚙️ Central de Configuração",
         description=(
-            "Configure as funções do Ratinho "
-            "neste servidor.\n"
-            "Escolha uma opção abaixo:"
+            "Gerencie os recursos do Ratinho neste servidor.\n"
+            "Selecione uma categoria para consultar e ajustar as configurações disponíveis."
         ),
         color=COR_PRINCIPAL
     )
@@ -365,7 +375,7 @@ def embed_painel_principal(guild, guild_id):
     v_logs += "\nRegistra mensagens, entradas, "
     v_logs += "saídas, bans e mais."
     e.add_field(
-        name="📋  Events Logs",
+        name="📋  Registro de eventos",
         value=v_logs,
         inline=True
     )
@@ -428,7 +438,7 @@ def embed_logs(guild_id):
         ),
         inline=False
     )
-    e.set_footer(text="Events Logs  •  Ratinho")
+    e.set_footer(text="Registro de eventos • Ratinho")
     return e
 
 def embed_ticket(guild_id):
@@ -441,8 +451,10 @@ def embed_ticket(guild_id):
     e = discord.Embed(
         title="🎫  Configuração de Tickets",
         description="Crie vários tipos de atendimento e personalize o nome, a cor e o cargo responsável por cada botão.",
-        color=COR_PRINCIPAL
+        color=parse_cor(cfg.get("cor") or "amarelo")
     )
+    if cfg.get("imagem"):
+        e.set_image(url=cfg["imagem"])
     e.add_field(name="Canal do Painel", value=canal_txt(cfg.get("canal_painel")), inline=True)
     e.add_field(name="Categoria", value=canal_txt(cfg.get("categoria")), inline=True)
     e.add_field(name=f"Botões configurados ({len(botoes)})", value=resumo[:1024], inline=False)
@@ -462,8 +474,10 @@ def embed_entrada_saida(guild_id, tipo):
     e = discord.Embed(
         title=titulo,
         description=desc,
-        color=COR_PRINCIPAL
+        color=parse_cor(cfg.get("cor") or ("verde" if is_entrada else "vermelho"))
     )
+    if cfg.get("imagem"):
+        e.set_image(url=cfg["imagem"])
     e.add_field(
         name="Status",
         value=status_txt(cfg["ativo"]),
@@ -524,6 +538,41 @@ class ModalMensagem(discord.ui.Modal):
             "✅ Mensagem salva!",
             ephemeral=True
         )
+
+class ModalAparencia(discord.ui.Modal):
+    def __init__(self, guild_id, tipo):
+        super().__init__(title="Personalizar aparência")
+        self.guild_id = guild_id
+        self.tipo = tipo
+        cfg = get_guild_config(guild_id)[tipo]
+        self.cor = discord.ui.TextInput(
+            label="Cor (nome ou código hexadecimal)",
+            placeholder="Ex.: amarelo ou #F1C40F",
+            default=str(cfg.get("cor") or "amarelo"),
+            required=False,
+            max_length=20
+        )
+        self.imagem = discord.ui.TextInput(
+            label="URL da imagem (deixe vazio para remover)",
+            placeholder="https://...",
+            default=str(cfg.get("imagem") or ""),
+            required=False,
+            max_length=400
+        )
+        self.add_item(self.cor)
+        self.add_item(self.imagem)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        cor = self.cor.value.strip() or "amarelo"
+        imagem = self.imagem.value.strip() or None
+        if imagem and not imagem.lower().startswith(("https://", "http://")):
+            await interaction.response.send_message("❌ A imagem precisa ser um link HTTP ou HTTPS válido.", ephemeral=True)
+            return
+        cfg = get_guild_config(self.guild_id)
+        cfg[self.tipo]["cor"] = cor
+        cfg[self.tipo]["imagem"] = imagem
+        update_guild_config(self.guild_id, cfg)
+        await interaction.response.send_message("✅ Aparência salva com sucesso!", ephemeral=True)
 
 # ---------- Selects ----------
 class SelectCanalView(discord.ui.View):
@@ -710,7 +759,7 @@ class GerenciarBotaoTicketView(discord.ui.View):
         super().__init__(timeout=120)
         self.guild_id, self.botao_id = guild_id, botao_id
 
-    @discord.ui.button(label="Editar nome e cor", style=discord.ButtonStyle.primary, emoji="✏️")
+    @discord.ui.button(label="Editar nome e cor", style=discord.ButtonStyle.secondary, emoji="✏️")
     async def editar(self, interaction, button):
         await interaction.response.send_modal(ModalBotaoTicket(self.guild_id, self.botao_id))
 
@@ -718,7 +767,7 @@ class GerenciarBotaoTicketView(discord.ui.View):
     async def cargo(self, interaction, button):
         await interaction.response.send_message("Selecione o cargo responsável:", view=SelectCargoBotaoView(self.guild_id, self.botao_id), ephemeral=True)
 
-    @discord.ui.button(label="Excluir botão", style=discord.ButtonStyle.danger, emoji="🗑️")
+    @discord.ui.button(label="Excluir botão", style=discord.ButtonStyle.secondary, emoji="🗑️")
     async def excluir(self, interaction, button):
         cfg = get_guild_config(self.guild_id)
         cfg["ticket"]["botoes"] = [b for b in cfg["ticket"].get("botoes", []) if b["id"] != self.botao_id]
@@ -762,7 +811,11 @@ class TicketView(discord.ui.View):
     async def categoria(self, interaction, button):
         await interaction.response.send_message("Selecione a categoria onde os tickets serão criados:", view=SelectCanalView(self.guild_id, "ticket_categoria", "category"), ephemeral=True)
 
-    @discord.ui.button(label="Adicionar botão", style=discord.ButtonStyle.success, emoji="➕", row=1)
+    @discord.ui.button(label="Personalizar aparência", style=discord.ButtonStyle.secondary, emoji="🎨", row=1)
+    async def aparencia(self, interaction, button):
+        await interaction.response.send_modal(ModalAparencia(self.guild_id, "ticket"))
+
+    @discord.ui.button(label="Adicionar botão", style=discord.ButtonStyle.secondary, emoji="➕", row=1)
     async def adicionar(self, interaction, button):
         await interaction.response.send_modal(ModalBotaoTicket(self.guild_id))
 
@@ -773,7 +826,7 @@ class TicketView(discord.ui.View):
             return
         await interaction.response.send_message("Selecione um botão para editar, trocar o cargo ou excluir:", view=SelectGerenciarBotaoTicketView(self.guild_id), ephemeral=True)
 
-    @discord.ui.button(label="Enviar Painel", style=discord.ButtonStyle.primary, emoji="📤", row=1)
+    @discord.ui.button(label="Enviar Painel", style=discord.ButtonStyle.secondary, emoji="📤", row=2)
     async def enviar(self, interaction, button):
         cfg = get_guild_config(self.guild_id)["ticket"]
         if not cfg.get("canal_painel"):
@@ -786,12 +839,14 @@ class TicketView(discord.ui.View):
         if not canal:
             await interaction.response.send_message("❌ Canal não encontrado!", ephemeral=True)
             return
-        embed = discord.Embed(title="🎫  Central de Atendimento", description=cfg["mensagem"], color=COR_PRINCIPAL)
+        embed = discord.Embed(title="🎫  Central de Atendimento", description=cfg["mensagem"], color=parse_cor(cfg.get("cor")))
+        if cfg.get("imagem"):
+            embed.set_image(url=cfg["imagem"])
         embed.set_footer(text="Escolha abaixo o tipo de atendimento desejado")
         await canal.send(embed=embed, view=TicketAbrirView(self.guild_id))
         await interaction.response.send_message(f"✅ Painel enviado em {canal.mention}!", ephemeral=True)
 
-    @discord.ui.button(label="Voltar", style=discord.ButtonStyle.secondary, emoji="⬅️", row=2)
+    @discord.ui.button(label="Voltar", style=discord.ButtonStyle.secondary, emoji="⬅️", row=3)
     async def voltar(self, interaction, button):
         await interaction.response.edit_message(embed=embed_painel_principal(interaction.guild, self.guild_id), view=PainelConfigView(self.guild_id))
 
@@ -838,11 +893,22 @@ class EntradaSaidaView(discord.ui.View):
             ModalMensagem(self.guild_id, self.tipo, titulo)
         )
 
+    @discord.ui.button(label="Ativar / Desativar", style=discord.ButtonStyle.secondary, emoji="🔄", row=1)
+    async def toggle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cfg = get_guild_config(self.guild_id)
+        cfg[self.tipo]["ativo"] = not cfg[self.tipo]["ativo"]
+        update_guild_config(self.guild_id, cfg)
+        await interaction.response.edit_message(embed=embed_entrada_saida(self.guild_id, self.tipo), view=self)
+
+    @discord.ui.button(label="Personalizar aparência", style=discord.ButtonStyle.secondary, emoji="🎨", row=1)
+    async def aparencia(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ModalAparencia(self.guild_id, self.tipo))
+
     @discord.ui.button(
         label="Voltar",
         style=discord.ButtonStyle.secondary,
         emoji="⬅️",
-        row=1
+        row=2
     )
     async def voltar(
         self,
@@ -1004,8 +1070,10 @@ async def abrir_ticket_tipo(interaction, botao_id):
     embed = discord.Embed(
         title=f"🎫  {dados.get('nome', 'Ticket')} aberto",
         description=f"Olá {interaction.user.mention}! Descreva o que precisa e a equipe responsável irá atender você.",
-        color=parse_cor(dados.get("cor"))
+        color=parse_cor(cfg.get("cor") or dados.get("cor"))
     )
+    if cfg.get("imagem"):
+        embed.set_image(url=cfg["imagem"])
     ping = f"<@&{cargo_id}>" if cargo_id else ""
     await canal.send(content=ping, embed=embed, view=TicketFecharView(), allowed_mentions=discord.AllowedMentions(roles=True))
     await interaction.response.send_message(f"✅ Ticket criado: {canal.mention}", ephemeral=True)
@@ -1113,9 +1181,11 @@ async def on_member_join(member):
             )
             e = discord.Embed(
                 description=texto,
-                color=COR_SUCESSO
+                color=parse_cor(cfg["entrada"].get("cor") or "verde")
             )
             e.set_thumbnail(url=member.display_avatar.url)
+            if cfg["entrada"].get("imagem"):
+                e.set_image(url=cfg["entrada"]["imagem"])
             await canal.send(embed=e)
     await enviar_log(
         member.guild,
@@ -1140,12 +1210,13 @@ async def on_member_remove(member):
                 member,
                 member.guild
             )
-            await canal.send(
-                embed=discord.Embed(
-                    description=texto,
-                    color=COR_ERRO
-                )
+            embed_saida = discord.Embed(
+                description=texto,
+                color=parse_cor(cfg["saida"].get("cor") or "vermelho")
             )
+            if cfg["saida"].get("imagem"):
+                embed_saida.set_image(url=cfg["saida"]["imagem"])
+            await canal.send(embed=embed_saida)
     await enviar_log(
         member.guild,
         "🚪  Membro Saiu",
@@ -1193,6 +1264,36 @@ async def on_message_edit(before, after):
         txt,
         COR_INFO
     )
+
+@bot.event
+async def on_user_update(before, after):
+    alteracoes = []
+    if before.name != after.name:
+        alteracoes.append(f"**Nome:** `{before.name}` → `{after.name}`")
+    if before.global_name != after.global_name:
+        alteracoes.append(f"**Nome de exibição:** `{before.global_name or before.name}` → `{after.global_name or after.name}`")
+    if before.display_avatar.key != after.display_avatar.key:
+        alteracoes.append("**Foto de perfil:** alterada")
+    if not alteracoes:
+        return
+    descricao = f"**Usuário:** <@{after.id}> (`{after.id}`)\n" + "\n".join(alteracoes)
+    if before.display_avatar.key != after.display_avatar.key:
+        descricao += f"\n[Ver nova foto de perfil]({after.display_avatar.url})"
+    for guild in bot.guilds:
+        if guild.get_member(after.id):
+            await enviar_log(guild, "👤 Perfil de membro atualizado", descricao, COR_INFO)
+
+@bot.event
+async def on_member_update(before, after):
+    if before.nick != after.nick:
+        antigo = before.nick or before.name
+        novo = after.nick or after.name
+        await enviar_log(
+            after.guild,
+            "👤 Nome de membro atualizado",
+            f"**Membro:** {after.mention} (`{after.id}`)\n**Antes:** `{antigo}`\n**Depois:** `{novo}`",
+            COR_INFO
+        )
 
 @bot.event
 async def on_member_ban(guild, user):
@@ -1508,6 +1609,121 @@ async def daily(ctx):
     )
     await ctx.send(embed=embed)
 
+# ---------- Moderação: comandos híbridos (prefixo v e slash) ----------
+async def preparar_resposta_silenciosa(ctx):
+    if ctx.interaction and not ctx.interaction.response.is_done():
+        await ctx.defer(ephemeral=True)
+
+async def finalizar_resposta_silenciosa(ctx):
+    if ctx.interaction:
+        try:
+            await ctx.interaction.delete_original_response()
+        except discord.HTTPException:
+            pass
+
+@bot.hybrid_command(name="banir", description="Bane um membro do servidor")
+@app_commands.default_permissions(ban_members=True)
+@commands.has_permissions(ban_members=True)
+async def banir(ctx, membro: discord.Member, motivo: str = "Não informado"):
+    if ctx.guild is None:
+        return
+    await preparar_resposta_silenciosa(ctx)
+    try:
+        await ctx.guild.ban(membro, reason=f"{motivo} | Aplicado por {ctx.author}")
+        await finalizar_resposta_silenciosa(ctx)
+    except discord.Forbidden:
+        await ctx.send("❌ Não tenho permissão para banir esse membro.", delete_after=8)
+    except discord.HTTPException:
+        await ctx.send("❌ Não foi possível banir esse membro.", delete_after=8)
+
+@bot.hybrid_command(name="expulsar", description="Expulsa um membro do servidor")
+@app_commands.default_permissions(kick_members=True)
+@commands.has_permissions(kick_members=True)
+async def expulsar(ctx, membro: discord.Member, motivo: str = "Não informado"):
+    if ctx.guild is None:
+        return
+    await preparar_resposta_silenciosa(ctx)
+    try:
+        await ctx.guild.kick(membro, reason=f"{motivo} | Aplicado por {ctx.author}")
+        await finalizar_resposta_silenciosa(ctx)
+    except discord.Forbidden:
+        await ctx.send("❌ Não tenho permissão para expulsar esse membro.", delete_after=8)
+    except discord.HTTPException:
+        await ctx.send("❌ Não foi possível expulsar esse membro.", delete_after=8)
+
+@bot.hybrid_command(name="mutar", description="Aplica timeout em um membro")
+@app_commands.default_permissions(moderate_members=True)
+@commands.has_permissions(moderate_members=True)
+async def mutar(ctx, membro: discord.Member, minutos: app_commands.Range[int, 1, 40320] = 10, motivo: str = "Não informado"):
+    if ctx.guild is None:
+        return
+    await preparar_resposta_silenciosa(ctx)
+    try:
+        await membro.timeout(discord.utils.utcnow() + timedelta(minutes=minutos), reason=f"{motivo} | Aplicado por {ctx.author}")
+        await finalizar_resposta_silenciosa(ctx)
+    except discord.Forbidden:
+        await ctx.send("❌ Não tenho permissão para mutar esse membro.", delete_after=8)
+    except discord.HTTPException:
+        await ctx.send("❌ Não foi possível mutar esse membro.", delete_after=8)
+
+@bot.hybrid_command(name="unban", description="Remove o banimento de um usuário pelo ID")
+@app_commands.default_permissions(ban_members=True)
+@commands.has_permissions(ban_members=True)
+async def unban(ctx, usuario_id: str):
+    if ctx.guild is None:
+        return
+    await preparar_resposta_silenciosa(ctx)
+    try:
+        user = await bot.fetch_user(int(usuario_id))
+        await ctx.guild.unban(user, reason=f"Desbanido por {ctx.author}")
+        await finalizar_resposta_silenciosa(ctx)
+    except ValueError:
+        await ctx.send("❌ Informe um ID de usuário válido.", delete_after=8)
+    except discord.NotFound:
+        await ctx.send("❌ Esse usuário não está banido.", delete_after=8)
+    except discord.Forbidden:
+        await ctx.send("❌ Não tenho permissão para desbanir usuários.", delete_after=8)
+    except discord.HTTPException:
+        await ctx.send("❌ Não foi possível desbanir esse usuário.", delete_after=8)
+
+@bot.hybrid_command(name="desmutar", description="Remove o timeout de um membro")
+@app_commands.default_permissions(moderate_members=True)
+@commands.has_permissions(moderate_members=True)
+async def desmutar(ctx, membro: discord.Member):
+    if ctx.guild is None:
+        return
+    await preparar_resposta_silenciosa(ctx)
+    try:
+        await membro.timeout(None, reason=f"Timeout removido por {ctx.author}")
+        await finalizar_resposta_silenciosa(ctx)
+    except discord.Forbidden:
+        await ctx.send("❌ Não tenho permissão para remover o timeout.", delete_after=8)
+    except discord.HTTPException:
+        await ctx.send("❌ Não foi possível desmutar esse membro.", delete_after=8)
+
+@bot.hybrid_command(name="clear", description="Apaga mensagens do canal")
+@app_commands.default_permissions(manage_messages=True)
+@commands.has_permissions(manage_messages=True)
+async def clear(ctx, quantidade: app_commands.Range[int, 1, 100] = 100):
+    if ctx.guild is None:
+        return
+    try:
+        if ctx.interaction:
+            await ctx.interaction.response.defer(ephemeral=True)
+        await ctx.channel.purge(limit=quantidade + (0 if ctx.interaction else 1), check=lambda m: not m.pinned)
+        if ctx.interaction:
+            await ctx.interaction.delete_original_response()
+    except discord.Forbidden:
+        if ctx.interaction:
+            await ctx.followup.send("❌ Não tenho permissão para apagar mensagens.", ephemeral=True)
+        else:
+            await ctx.send("❌ Não tenho permissão para apagar mensagens.", delete_after=8)
+    except discord.HTTPException:
+        if ctx.interaction:
+            await ctx.followup.send("❌ Não foi possível apagar as mensagens.", ephemeral=True)
+        else:
+            await ctx.send("❌ Não foi possível apagar as mensagens.", delete_after=8)
+
 @bot.hybrid_command(
     name="configurar",
     description="Painel de configuração do servidor (só ADM)"
@@ -1550,19 +1766,19 @@ async def configurar_error(ctx, error):
 @app_commands.default_permissions(administrator=True)
 @app_commands.checks.has_permissions(administrator=True)
 @app_commands.describe(
-    mensagem="Mensagem do embed (obrigatório)",
+    mensagem="Texto principal do embed (opcional)",
     cor="Cor: nome ou #hex. Se vazio, fica amarelo",
     midia="Link de imagem (opcional)"
 )
 async def criar_embed(
     interaction: discord.Interaction,
-    mensagem: str,
+    mensagem: str = None,
     cor: str = None,
     midia: str = None
 ):
     await interaction.response.defer(ephemeral=True)
     embed = discord.Embed(
-        description=mensagem,
+        description=mensagem or "\u200b",
         color=parse_cor(cor)
     )
     if midia and midia.strip().startswith("http"):
