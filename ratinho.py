@@ -123,6 +123,11 @@ bot = commands.Bot(command_prefix="v", intents=intents)
 @bot.event
 async def on_ready():
     print(f"Logado como {bot.user}")
+    try:
+        synced = await bot.tree.sync()
+        print(f"Sincronizados {len(synced)} comandos slash!")
+    except Exception as e:
+        print(f"Erro ao sincronizar slash: {e}")
     await bot.change_presence(
         status=discord.Status.idle,
         activity=discord.CustomActivity(
@@ -150,7 +155,7 @@ async def on_guild_remove(guild):
 
 # ===== COMANDOS DE VOLTS =====
 
-@bot.command(name="atm")
+@bot.hybrid_command(name="atm", description="Consulta o saldo de volts")
 async def atm(ctx, membro: discord.Member = None):
     if membro is None:
         membro = ctx.author
@@ -160,14 +165,14 @@ async def atm(ctx, membro: discord.Member = None):
         title="🏦 Banco Volts",
         description=f"Saldo atual de **{membro.display_name}**",
         color=COR_PRINCIPAL,
-        timestamp=ctx.message.created_at
+        timestamp=discord.utils.utcnow()
     )
     embed.set_thumbnail(url=membro.display_avatar.url)
     embed.add_field(name="⚡ Volts", value=f"**{saldo:,}** volts".replace(",", "."), inline=False)
     embed.set_footer(text=f"Solicitado por {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
     await ctx.send(embed=embed)
 
-@bot.group(name="volts", invoke_without_command=True)
+@bot.hybrid_group(name="volts", description="Sistema Volts", invoke_without_command=True)
 async def volts_group(ctx):
     embed = discord.Embed(
         title="⚡ Sistema Volts",
@@ -180,7 +185,7 @@ async def volts_group(ctx):
     embed.set_footer(text=f"Solicitado por {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
     await ctx.send(embed=embed)
 
-@volts_group.command(name="pagar")
+@volts_group.command(name="pagar", description="Realiza uma transferência com confirmação")
 async def volts_pagar(ctx, membro: discord.Member = None, valor: int = None):
     if membro is None or valor is None:
         embed = discord.Embed(
@@ -270,7 +275,7 @@ async def volts_pagar(ctx, membro: discord.Member = None, valor: int = None):
     embed_sucesso.add_field(name="Valor transferido", value=f"⚡ **{valor:,}** volts".replace(",", "."), inline=False)
     await msg.edit(embed=embed_sucesso, view=None)
 
-@bot.command(name="daily")
+@bot.hybrid_command(name="daily", description="Resgata sua recompensa diária")
 async def daily(ctx):
     dados = carregar()
     uid = str(ctx.author.id)
@@ -315,6 +320,7 @@ async def daily(ctx):
 async def on_message(message):
     if message.author == bot.user:
         return
+    # Só responde se a mensagem for APENAS o @ do bot, sem nenhum outro texto
     conteudo_sem_mencao = re.sub(r"<@!?\d+>", "", message.content).strip()
     so_marcou_bot = bot.user in message.mentions and conteudo_sem_mencao == ""
 
