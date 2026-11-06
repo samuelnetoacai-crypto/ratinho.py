@@ -22,7 +22,7 @@ import urllib.request
 import urllib.parse
 import asyncio
 import uuid
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 
 # ============================================================
 #  1. FLASK - MANTER ONLINE
@@ -199,6 +199,7 @@ def get_guild_config(guild_id):
     dados[gid]["saida"].setdefault("imagem", None)
     dados[gid].setdefault("ticket", {}).setdefault("cor", "amarelo")
     dados[gid]["ticket"].setdefault("imagem", None)
+    dados[gid]["ticket"].setdefault("rodape", "")
     ticket_cfg = dados[gid].setdefault("ticket", {})
     ticket_cfg.setdefault("botoes", [{
         "id": "suporte", "nome": "Suporte", "cor": "azul",
@@ -539,6 +540,30 @@ class ModalMensagem(discord.ui.Modal):
             ephemeral=True
         )
 
+class ModalRodapeTicket(discord.ui.Modal):
+    def __init__(self, guild_id):
+        super().__init__(title="Personalizar rodapé do painel")
+        self.guild_id = guild_id
+        atual = get_guild_config(guild_id)["ticket"].get("rodape", "")
+        self.rodape = discord.ui.TextInput(
+            label="Texto do rodapé (opcional)",
+            placeholder="Deixe vazio para não exibir rodapé",
+            default=atual,
+            required=False,
+            max_length=2048
+        )
+        self.add_item(self.rodape)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        cfg = get_guild_config(self.guild_id)
+        cfg["ticket"]["rodape"] = self.rodape.value.strip()
+        update_guild_config(self.guild_id, cfg)
+        await interaction.response.send_message(
+            "✅ Rodapé salvo! Se deixar vazio, nenhum rodapé será exibido.",
+            ephemeral=True
+        )
+
+
 class ModalAparencia(discord.ui.Modal):
     def __init__(self, guild_id, tipo):
         super().__init__(title="Personalizar aparência")
@@ -815,6 +840,10 @@ class TicketView(discord.ui.View):
     async def aparencia(self, interaction, button):
         await interaction.response.send_modal(ModalAparencia(self.guild_id, "ticket"))
 
+    @discord.ui.button(label="Personalizar rodapé", style=discord.ButtonStyle.secondary, emoji="📝", row=1)
+    async def personalizar_rodape(self, interaction, button):
+        await interaction.response.send_modal(ModalRodapeTicket(self.guild_id))
+
     @discord.ui.button(label="Adicionar botão", style=discord.ButtonStyle.secondary, emoji="➕", row=1)
     async def adicionar(self, interaction, button):
         await interaction.response.send_modal(ModalBotaoTicket(self.guild_id))
@@ -839,10 +868,11 @@ class TicketView(discord.ui.View):
         if not canal:
             await interaction.response.send_message("❌ Canal não encontrado!", ephemeral=True)
             return
-        embed = discord.Embed(title="🎫  Central de Atendimento", description=cfg["mensagem"], color=parse_cor(cfg.get("cor")))
+        embed = discord.Embed(description=cfg["mensagem"], color=parse_cor(cfg.get("cor")))
         if cfg.get("imagem"):
             embed.set_image(url=cfg["imagem"])
-        embed.set_footer(text="Escolha abaixo o tipo de atendimento desejado")
+        if cfg.get("rodape"):
+            embed.set_footer(text=cfg["rodape"])
         await canal.send(embed=embed, view=TicketAbrirView(self.guild_id))
         await interaction.response.send_message(f"✅ Painel enviado em {canal.mention}!", ephemeral=True)
 
@@ -1555,17 +1585,22 @@ async def daily(ctx):
     dados = carregar()
     uid = str(ctx.author.id)
     agora = time.time()
+    fuso_brasilia = timezone(timedelta(hours=-3))
+    hoje = datetime.now(fuso_brasilia).date()
     if uid not in dados:
         dados[uid] = {"volts": 0, "last_daily": 0}
-    falta = 86400 - (agora - dados[uid].get("last_daily", 0))
-    if falta > 0:
-        horas = int(falta // 3600)
-        minutos = int((falta % 3600) // 60)
+    ultimo_resgate = dados[uid].get("last_daily", 0)
+    data_ultimo = dados[uid].get("last_daily_date")
+    if not data_ultimo and ultimo_resgate:
+        data_ultimo = datetime.fromtimestamp(ultimo_resgate, fuso_brasilia).date().isoformat()
+    if data_ultimo == hoje.isoformat():
+        amanha = datetime.combine(hoje + timedelta(days=1), datetime.min.time(), tzinfo=fuso_brasilia)
+        falta = max(0, int((amanha - datetime.now(fuso_brasilia)).total_seconds()))
+        horas = falta // 3600
+        minutos = (falta % 3600) // 60
         embed = discord.Embed(
             title="⏰  Recompensa diária indisponível",
-            description=(
-                "Você já resgatou sua recompensa diária."
-            ),
+            description="Você já resgatou sua recompensa diária. Volte depois da meia-noite!",
             color=COR_ERRO
         )
         embed.add_field(
@@ -1582,6 +1617,7 @@ async def daily(ctx):
     ganho = random.randint(2000, 5000)
     dados[uid]["volts"] += ganho
     dados[uid]["last_daily"] = agora
+    dados[uid]["last_daily_date"] = hoje.isoformat()
     salvar(dados)
     embed = discord.Embed(
         title="🎉  Recompensa Diária Resgatada",
@@ -1600,13 +1636,146 @@ async def daily(ctx):
     )
     embed.add_field(
         name="Próximo resgate",
-        value="Disponível em 24 horas.",
+        value="Disponível novamente à meia-noite (horário de Brasília).",
         inline=False
     )
     embed.set_footer(
         text=f"Solicitado por {ctx.author.display_name}",
         icon_url=ctx.author.display_avatar.url
     )
+    await ctx.send(embed=embed)
+
+
+@bot.hybrid_command(
+    name="roubar",
+    description="Tenta roubar 20% dos volts de outro membro"
+)
+async def roubar(ctx, membro: discord.Member = None):
+    """Permite até 3 tentativas em 24 horas; cada vítima só pode ser roubada uma vez por dia."""
+    if membro is None:
+        embed = discord.Embed(
+            title="⚠️  Comando incompleto",
+            description="Informe quem você deseja tentar roubar.\n\n**Uso:** `v roubar @usuário` ou `/roubar usuário`",
+            color=COR_ERRO
+        )
+        await ctx.send(embed=embed)
+        return
+
+    if membro.bot:
+        await ctx.send(embed=discord.Embed(
+            title="⚠️  Alvo inválido",
+            description="Não é possível roubar contas de bots.",
+            color=COR_ERRO
+        ))
+        return
+    if membro.id == ctx.author.id:
+        await ctx.send(embed=discord.Embed(
+            title="⚠️  Operação inválida",
+            description="Você não pode tentar roubar a si mesmo.",
+            color=COR_ERRO
+        ))
+        return
+
+    dados = carregar()
+    uid = str(ctx.author.id)
+    alvo_id = str(membro.id)
+    agora = time.time()
+    fuso_brasilia = timezone(timedelta(hours=-3))
+    hoje = datetime.now(fuso_brasilia).date().isoformat()
+
+    dados.setdefault(uid, {"volts": 0, "last_daily": 0})
+    dados.setdefault(alvo_id, {"volts": 0, "last_daily": 0})
+    dados[uid].setdefault("volts", 0)
+    dados[alvo_id].setdefault("volts", 0)
+
+    # Limite móvel: no máximo três tentativas dentro das últimas 24 horas.
+    usos = dados[uid].get("roubar_usos", [])
+    if not isinstance(usos, list):
+        usos = []
+    usos = [float(t) for t in usos if isinstance(t, (int, float)) and agora - float(t) < 86400]
+    if len(usos) >= 3:
+        restante = max(0, int(86400 - (agora - min(usos))))
+        horas, resto = divmod(restante, 3600)
+        minutos = resto // 60
+        embed = discord.Embed(
+            title="⏳  Limite de tentativas atingido",
+            description="Você já utilizou suas **3 tentativas** de roubo nas últimas 24 horas.",
+            color=COR_ERRO
+        )
+        embed.add_field(name="Próxima tentativa", value=f"Disponível em **{horas}h {minutos}min**.", inline=False)
+        embed.set_footer(text="O limite é renovado conforme cada tentativa completa 24 horas.")
+        await ctx.send(embed=embed)
+        return
+
+    data_ultimo_roubo = dados[alvo_id].get("roubado_em_data")
+    if data_ultimo_roubo == hoje:
+        embed = discord.Embed(
+            title="🛡️  Alvo protegido",
+            description=f"{membro.mention} já foi roubado hoje e não pode ser roubado novamente até a próxima virada do dia.",
+            color=COR_ERRO
+        )
+        embed.add_field(name="Proteção", value="A vítima só pode sofrer um roubo bem-sucedido por dia.", inline=False)
+        await ctx.send(embed=embed)
+        return
+
+    # Toda tentativa válida consome uma das três utilizações, inclusive em caso de falha.
+    usos.append(agora)
+    dados[uid]["roubar_usos"] = usos
+    saldo_alvo = max(0, int(dados[alvo_id]["volts"]))
+
+    if saldo_alvo <= 0:
+        salvar(dados)
+        embed = discord.Embed(
+            title="🏦  Carteira vazia",
+            description=f"{membro.mention} não possui Volts para serem roubados.",
+            color=COR_ERRO
+        )
+        embed.add_field(name="Tentativas restantes", value=f"**{3 - len(usos)}/3** nas próximas 24 horas", inline=False)
+        await ctx.send(embed=embed)
+        return
+
+    if random.random() < 0.60:
+        valor = int(saldo_alvo * 0.20)
+        if valor < 1:
+            salvar(dados)
+            embed = discord.Embed(
+                title="⚠️  Saldo insuficiente para o roubo",
+                description=f"O saldo de {membro.mention} é muito baixo para transferir 20% (mínimo de 1 Volt).",
+                color=COR_ERRO
+            )
+            await ctx.send(embed=embed)
+            return
+        dados[alvo_id]["volts"] -= valor
+        dados[uid]["volts"] = int(dados[uid].get("volts", 0)) + valor
+        dados[alvo_id]["roubado_em_data"] = hoje
+        salvar(dados)
+
+        embed = discord.Embed(
+            title="💰  Roubo bem-sucedido!",
+            description=f"{ctx.author.mention} conseguiu roubar **20% dos Volts** de {membro.mention}!",
+            color=COR_SUCESSO,
+            timestamp=discord.utils.utcnow()
+        )
+        embed.add_field(name="🦹 Ladrão", value=ctx.author.mention, inline=True)
+        embed.add_field(name="🎯 Vítima", value=membro.mention, inline=True)
+        embed.add_field(name="⚡ Volts roubados", value=fmt_volts(valor), inline=False)
+        embed.add_field(name="Seu novo saldo", value=fmt_volts(dados[uid]["volts"]), inline=True)
+        embed.add_field(name="Saldo da vítima", value=fmt_volts(dados[alvo_id]["volts"]), inline=True)
+        embed.add_field(name="Tentativas restantes", value=f"**{3 - len(usos)}/3** nas próximas 24 horas", inline=False)
+        embed.set_footer(text="A vítima estará protegida contra novos roubos até amanhã (horário de Brasília).")
+    else:
+        salvar(dados)
+        embed = discord.Embed(
+            title="🚨  Roubo frustrado!",
+            description=f"{ctx.author.mention}, sua tentativa de roubar {membro.mention} falhou! A vítima conseguiu escapar.",
+            color=COR_ERRO,
+            timestamp=discord.utils.utcnow()
+        )
+        embed.add_field(name="Chance de sucesso", value="60%", inline=True)
+        embed.add_field(name="Chance de falha", value="40%", inline=True)
+        embed.add_field(name="Tentativas restantes", value=f"**{3 - len(usos)}/3** nas próximas 24 horas", inline=False)
+        embed.set_footer(text="Uma tentativa foi contabilizada. Tente novamente quando seu limite renovar.")
+
     await ctx.send(embed=embed)
 
 # ---------- Moderação: comandos híbridos (prefixo v e slash) ----------
