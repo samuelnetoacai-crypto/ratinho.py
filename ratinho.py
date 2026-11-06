@@ -276,9 +276,8 @@ def formatar_mensagem(texto, membro, guild):
     return texto
 
 def status_txt(ativo: bool):
-    if ativo:
-        return "🟢 Ativo"
-    return "🔴 Desativado"
+    """Apresenta o estado sem indicadores coloridos, mantendo o padrão formal."""
+    return "Ativo" if ativo else "Desativado"
 
 def canal_txt(canal_id):
     if canal_id:
@@ -370,8 +369,9 @@ def embed_painel_principal(guild, guild_id):
     e = discord.Embed(
         title="⚙️ Central de Configuração",
         description=(
-            "Gerencie os recursos do Ratinho neste servidor.\n"
-            "Escolha uma categoria nos botões abaixo para ver os detalhes e fazer ajustes."
+            "Gerencie os recursos e as funcionalidades do Ratinho neste servidor.\\n"
+            "Selecione uma das categorias disponíveis para consultar informações "
+            "e administrar suas respectivas configurações."
         ),
         color=COR_PRINCIPAL
     )
@@ -379,32 +379,32 @@ def embed_painel_principal(guild, guild_id):
         e.set_thumbnail(url=guild.icon.url)
 
     v_logs = (
-        f"◦ **Status:** {status_txt(cfg['logs']['ativo'])}\n"
-        f"◦ **Canal:** {canal_txt(cfg['logs']['canal'])}\n"
-        "◦ **Função:** registra eventos importantes do servidor."
+        f"▸ **Situação:** {status_txt(cfg['logs']['ativo'])}\\n"
+        f"▸ **Canal de registro:** {canal_txt(cfg['logs']['canal'])}\\n"
+        "▸ **Finalidade:** registrar atividades e eventos relevantes do servidor."
     )
-    e.add_field(name="📋 Registro de eventos", value=v_logs, inline=False)
+    e.add_field(name="📋  Registro de eventos", value=v_logs, inline=False)
 
     v_ticket = (
-        f"◦ **Painel:** {canal_txt(cfg['ticket']['canal_painel'])}\n"
-        f"◦ **Tipos criados:** {len(cfg['ticket'].get('botoes', []))}"
+        f"▸ **Canal do painel:** {canal_txt(cfg['ticket']['canal_painel'])}\\n"
+        f"▸ **Tipos de atendimento:** {len(cfg['ticket'].get('botoes', []))} configurado(s)"
     )
-    e.add_field(name="🎫 Sistema de tickets", value=v_ticket, inline=False)
+    e.add_field(name="🎫  Sistema de tickets", value=v_ticket, inline=False)
 
     v_ent = (
-        f"◦ **Status:** {status_txt(cfg['entrada']['ativo'])}\n"
-        f"◦ **Canal:** {canal_txt(cfg['entrada']['canal'])}\n"
-        "◦ **Função:** envia uma mensagem quando alguém entra."
+        f"▸ **Situação:** {status_txt(cfg['entrada']['ativo'])}\\n"
+        f"▸ **Canal de publicação:** {canal_txt(cfg['entrada']['canal'])}\\n"
+        "▸ **Finalidade:** publicar uma notificação sempre que um membro ingressar no servidor."
     )
-    e.add_field(name="👋 Mensagens de entrada", value=v_ent, inline=False)
+    e.add_field(name="👋  Mensagens de entrada", value=v_ent, inline=False)
 
     v_sai = (
-        f"◦ **Status:** {status_txt(cfg['saida']['ativo'])}\n"
-        f"◦ **Canal:** {canal_txt(cfg['saida']['canal'])}\n"
-        "◦ **Função:** envia uma mensagem quando alguém sai."
+        f"▸ **Situação:** {status_txt(cfg['saida']['ativo'])}\\n"
+        f"▸ **Canal de publicação:** {canal_txt(cfg['saida']['canal'])}\\n"
+        "▸ **Finalidade:** publicar uma notificação sempre que um membro deixar o servidor."
     )
-    e.add_field(name="🚪 Mensagens de saída", value=v_sai, inline=False)
-    e.set_footer(text=f"{guild.name}  •  Painel de Configuração")
+    e.add_field(name="🚪  Mensagens de saída", value=v_sai, inline=False)
+    e.set_footer(text=f"{guild.name}  •  Administração do Ratinho")
     return e
 
 
@@ -1750,7 +1750,7 @@ async def roubar(ctx, membro: discord.Member = None):
         await ctx.send(embed=embed)
         return
 
-    if random.random() < 0.60:
+    if random.random() < 0.70:
         valor = int(saldo_alvo * 0.20)
         if valor < 1:
             salvar(dados)
@@ -1787,8 +1787,8 @@ async def roubar(ctx, membro: discord.Member = None):
             color=COR_ERRO,
             timestamp=discord.utils.utcnow()
         )
-        embed.add_field(name="Chance de sucesso", value="60%", inline=True)
-        embed.add_field(name="Chance de falha", value="40%", inline=True)
+        embed.add_field(name="Chance de sucesso", value="70%", inline=True)
+        embed.add_field(name="Chance de falha", value="30%", inline=True)
         embed.add_field(name="Tentativas restantes", value=f"**{3 - len(usos)}/3** nas próximas 24 horas", inline=False)
         embed.set_footer(text="Uma tentativa foi contabilizada. Tente novamente quando seu limite renovar.")
 
