@@ -198,7 +198,6 @@ def get_guild_config(guild_id):
     dados[gid].setdefault("saida", {}).setdefault("cor", "vermelho")
     dados[gid]["saida"].setdefault("imagem", None)
     dados[gid].setdefault("ticket", {}).setdefault("cor", "amarelo")
-    dados[gid]["ticket"].setdefault("imagem", None)
     dados[gid]["ticket"].setdefault("rodape", "")
     ticket_cfg = dados[gid].setdefault("ticket", {})
     ticket_cfg.setdefault("botoes", [{
@@ -232,6 +231,14 @@ def add_volts(user_id, valor):
     dados[uid]["volts"] += valor
     salvar(dados)
     return dados[uid]["volts"]
+
+
+def ja_resgatou_daily(user_id, dados=None):
+    """Retorna True somente se o usuário já registrou ao menos um Daily."""
+    if dados is None:
+        dados = carregar()
+    conta = dados.get(str(user_id), {})
+    return bool(conta.get("last_daily_date") or conta.get("last_daily", 0))
 
 def parse_cor(cor_str):
     if not cor_str:
@@ -364,114 +371,100 @@ def embed_painel_principal(guild, guild_id):
         title="⚙️ Central de Configuração",
         description=(
             "Gerencie os recursos do Ratinho neste servidor.\n"
-            "Selecione uma categoria para consultar e ajustar as configurações disponíveis."
+            "Escolha uma categoria nos botões abaixo para ver os detalhes e fazer ajustes."
         ),
         color=COR_PRINCIPAL
     )
     if guild.icon:
         e.set_thumbnail(url=guild.icon.url)
-    v_logs = status_txt(cfg["logs"]["ativo"])
-    v_logs += "\n**Canal:** "
-    v_logs += canal_txt(cfg["logs"]["canal"])
-    v_logs += "\nRegistra mensagens, entradas, "
-    v_logs += "saídas, bans e mais."
-    e.add_field(
-        name="📋  Registro de eventos",
-        value=v_logs,
-        inline=True
+
+    v_logs = (
+        f"◦ **Status:** {status_txt(cfg['logs']['ativo'])}\n"
+        f"◦ **Canal:** {canal_txt(cfg['logs']['canal'])}\n"
+        "◦ **Função:** registra eventos importantes do servidor."
     )
-    v_ticket = "**Painel:** " + canal_txt(cfg["ticket"]["canal_painel"])
-    v_ticket += f"\n**Tipos de ticket:** {len(cfg['ticket'].get('botoes', []))}"
-    e.add_field(
-        name="🎫  Ticket",
-        value=v_ticket,
-        inline=True
+    e.add_field(name="📋 Registro de eventos", value=v_logs, inline=False)
+
+    v_ticket = (
+        f"◦ **Painel:** {canal_txt(cfg['ticket']['canal_painel'])}\n"
+        f"◦ **Tipos criados:** {len(cfg['ticket'].get('botoes', []))}"
     )
-    v_ent = status_txt(cfg["entrada"]["ativo"])
-    v_ent += "\n**Canal:** "
-    v_ent += canal_txt(cfg["entrada"]["canal"])
-    v_ent += "\nBoas-vindas quando alguém entra."
-    e.add_field(
-        name="👋  Mensagem de Entradas",
-        value=v_ent,
-        inline=True
+    e.add_field(name="🎫 Sistema de tickets", value=v_ticket, inline=False)
+
+    v_ent = (
+        f"◦ **Status:** {status_txt(cfg['entrada']['ativo'])}\n"
+        f"◦ **Canal:** {canal_txt(cfg['entrada']['canal'])}\n"
+        "◦ **Função:** envia uma mensagem quando alguém entra."
     )
-    v_sai = status_txt(cfg["saida"]["ativo"])
-    v_sai += "\n**Canal:** "
-    v_sai += canal_txt(cfg["saida"]["canal"])
-    v_sai += "\nDespedida quando alguém sai."
-    e.add_field(
-        name="🚪  Mensagem de Saídas",
-        value=v_sai,
-        inline=True
+    e.add_field(name="👋 Mensagens de entrada", value=v_ent, inline=False)
+
+    v_sai = (
+        f"◦ **Status:** {status_txt(cfg['saida']['ativo'])}\n"
+        f"◦ **Canal:** {canal_txt(cfg['saida']['canal'])}\n"
+        "◦ **Função:** envia uma mensagem quando alguém sai."
     )
-    e.set_footer(
-        text=f"{guild.name}  •  Painel de Configuração"
-    )
+    e.add_field(name="🚪 Mensagens de saída", value=v_sai, inline=False)
+    e.set_footer(text=f"{guild.name}  •  Painel de Configuração")
     return e
+
 
 def embed_logs(guild_id):
     cfg = get_guild_config(guild_id)["logs"]
     e = discord.Embed(
-        title="📋  Events Logs",
+        title="📋 Registro de eventos",
         description=(
-            "Configure onde os logs do servidor "
-            "vão aparecer."
+            "Ajuste o registro de atividades do servidor.\n"
+            "Use os controles abaixo para alterar as configurações."
         ),
         color=COR_PRINCIPAL
     )
+    e.add_field(name="◈ Status", value=status_txt(cfg["ativo"]), inline=True)
+    e.add_field(name="◈ Canal de registro", value=canal_txt(cfg["canal"]), inline=True)
     e.add_field(
-        name="Status",
-        value=status_txt(cfg["ativo"]),
-        inline=True
-    )
-    e.add_field(
-        name="Canal",
-        value=canal_txt(cfg["canal"]),
-        inline=True
-    )
-    e.add_field(
-        name="📌  O que é registrado",
+        name="▸ Eventos registrados",
         value=(
-            "• Mensagem apagada / editada\n"
-            "• Membro entrou / saiu\n"
-            "• Membro banido / desbanido"
+            "▫ Mensagens apagadas ou editadas\n"
+            "▫ Membros que entram ou saem\n"
+            "▫ Membros banidos ou desbanidos"
         ),
         inline=False
     )
-    e.set_footer(text="Registro de eventos • Ratinho")
+    e.set_footer(text="Registro de eventos  •  Ratinho")
     return e
+
 
 def embed_ticket(guild_id):
     cfg = get_guild_config(guild_id)["ticket"]
     botoes = cfg.get("botoes", [])
-    resumo = "\\n".join(
-        f"• **{b['nome']}** — {b.get('cor', 'azul')} — {cargo_txt(b.get('cargo_suporte'))}"
+    resumo = "\n".join(
+        f"▫ **{b['nome']}**  ·  {b.get('cor', 'azul')}  ·  {cargo_txt(b.get('cargo_suporte'))}"
         for b in botoes
     ) or "`Nenhum botão criado`"
     e = discord.Embed(
-        title="🎫  Configuração de Tickets",
-        description="Crie vários tipos de atendimento e personalize o nome, a cor e o cargo responsável por cada botão.",
+        title="🎫 Configuração de tickets",
+        description=(
+            "Gerencie o painel de atendimento e os tipos de ticket.\n"
+            "Cada botão pode ter sua própria cor e cargo responsável."
+        ),
         color=parse_cor(cfg.get("cor") or "amarelo")
     )
-    if cfg.get("imagem"):
-        e.set_image(url=cfg["imagem"])
-    e.add_field(name="Canal do Painel", value=canal_txt(cfg.get("canal_painel")), inline=True)
-    e.add_field(name="Categoria", value=canal_txt(cfg.get("categoria")), inline=True)
-    e.add_field(name=f"Botões configurados ({len(botoes)})", value=resumo[:1024], inline=False)
-    e.add_field(name="Mensagem do Painel", value=cfg.get("mensagem", "")[:1000], inline=False)
-    e.set_footer(text="Ticket  •  Ratinho")
+    e.add_field(name="◈ Canal do painel", value=canal_txt(cfg.get("canal_painel")), inline=True)
+    e.add_field(name="◈ Categoria dos tickets", value=canal_txt(cfg.get("categoria")), inline=True)
+    e.add_field(name=f"▸ Botões configurados · {len(botoes)}", value=resumo[:1024], inline=False)
+    e.add_field(name="▸ Mensagem exibida no painel", value=cfg.get("mensagem", "")[:1000] or "`Não definida`", inline=False)
+    e.set_footer(text="Tickets  •  Ratinho")
     return e
+
 
 def embed_entrada_saida(guild_id, tipo):
     cfg = get_guild_config(guild_id)[tipo]
     is_entrada = tipo == "entrada"
     if is_entrada:
-        titulo = "👋  Mensagem de Entradas"
-        desc = "Configure a mensagem de boas-vindas."
+        titulo = "👋 Mensagens de entrada"
+        desc = "Configure o aviso enviado quando um membro entra no servidor."
     else:
-        titulo = "🚪  Mensagem de Saídas"
-        desc = "Configure a mensagem de despedida."
+        titulo = "🚪 Mensagens de saída"
+        desc = "Configure o aviso enviado quando um membro sai do servidor."
     e = discord.Embed(
         title=titulo,
         description=desc,
@@ -479,28 +472,20 @@ def embed_entrada_saida(guild_id, tipo):
     )
     if cfg.get("imagem"):
         e.set_image(url=cfg["imagem"])
+    e.add_field(name="◈ Status", value=status_txt(cfg["ativo"]), inline=True)
+    e.add_field(name="◈ Canal", value=canal_txt(cfg["canal"]), inline=True)
     e.add_field(
-        name="Status",
-        value=status_txt(cfg["ativo"]),
-        inline=True
-    )
-    e.add_field(
-        name="Canal",
-        value=canal_txt(cfg["canal"]),
-        inline=True
-    )
-    e.add_field(
-        name="💬  Mensagem atual",
-        value=cfg["mensagem"][:1000],
+        name="▸ Mensagem configurada",
+        value=cfg["mensagem"][:1000] or "`Nenhuma mensagem definida`",
         inline=False
     )
     e.add_field(
-        name="🔧  Variáveis disponíveis",
+        name="▸ Variáveis que você pode usar",
         value=(
-            "`{user}`  •  menciona o membro\n"
-            "`{nome}`  •  nome do membro\n"
-            "`{server}`  •  nome do servidor\n"
-            "`{membros}`  •  total de membros"
+            "▫ `{user}`  ·  menciona o membro\n"
+            "▫ `{nome}`  ·  nome do membro\n"
+            "▫ `{server}`  ·  nome do servidor\n"
+            "▫ `{membros}`  ·  total de membros"
         ),
         inline=False
     )
@@ -577,27 +562,36 @@ class ModalAparencia(discord.ui.Modal):
             required=False,
             max_length=20
         )
-        self.imagem = discord.ui.TextInput(
-            label="URL da imagem (deixe vazio para remover)",
-            placeholder="https://...",
-            default=str(cfg.get("imagem") or ""),
-            required=False,
-            max_length=400
-        )
         self.add_item(self.cor)
-        self.add_item(self.imagem)
+        # Tickets não oferecem mais configuração de imagem.
+        if self.tipo != "ticket":
+            self.imagem = discord.ui.TextInput(
+                label="URL da imagem (deixe vazio para remover)",
+                placeholder="https://...",
+                default=str(cfg.get("imagem") or ""),
+                required=False,
+                max_length=400
+            )
+            self.add_item(self.imagem)
 
     async def on_submit(self, interaction: discord.Interaction):
         cor = self.cor.value.strip() or "amarelo"
-        imagem = self.imagem.value.strip() or None
-        if imagem and not imagem.lower().startswith(("https://", "http://")):
-            await interaction.response.send_message("❌ A imagem precisa ser um link HTTP ou HTTPS válido.", ephemeral=True)
-            return
         cfg = get_guild_config(self.guild_id)
         cfg[self.tipo]["cor"] = cor
-        cfg[self.tipo]["imagem"] = imagem
+        if self.tipo != "ticket":
+            imagem = self.imagem.value.strip() or None
+            if imagem and not imagem.lower().startswith(("https://", "http://")):
+                await interaction.response.send_message(
+                    "❌ A imagem precisa ser um link HTTP ou HTTPS válido.",
+                    ephemeral=True
+                )
+                return
+            cfg[self.tipo]["imagem"] = imagem
         update_guild_config(self.guild_id, cfg)
-        await interaction.response.send_message("✅ Aparência salva com sucesso!", ephemeral=True)
+        await interaction.response.send_message(
+            "✅ Aparência salva com sucesso!",
+            ephemeral=True
+        )
 
 # ---------- Selects ----------
 class SelectCanalView(discord.ui.View):
@@ -869,8 +863,6 @@ class TicketView(discord.ui.View):
             await interaction.response.send_message("❌ Canal não encontrado!", ephemeral=True)
             return
         embed = discord.Embed(description=cfg["mensagem"], color=parse_cor(cfg.get("cor")))
-        if cfg.get("imagem"):
-            embed.set_image(url=cfg["imagem"])
         if cfg.get("rodape"):
             embed.set_footer(text=cfg["rodape"])
         await canal.send(embed=embed, view=TicketAbrirView(self.guild_id))
@@ -1102,8 +1094,6 @@ async def abrir_ticket_tipo(interaction, botao_id):
         description=f"Olá {interaction.user.mention}! Descreva o que precisa e a equipe responsável irá atender você.",
         color=parse_cor(cfg.get("cor") or dados.get("cor"))
     )
-    if cfg.get("imagem"):
-        embed.set_image(url=cfg["imagem"])
     ping = f"<@&{cargo_id}>" if cargo_id else ""
     await canal.send(content=ping, embed=embed, view=TicketFecharView(), allowed_mentions=discord.AllowedMentions(roles=True))
     await interaction.response.send_message(f"✅ Ticket criado: {canal.mention}", ephemeral=True)
@@ -1294,6 +1284,8 @@ async def on_message_edit(before, after):
         txt,
         COR_INFO
     )
+    # Executa comandos prefixados após correção da mensagem por edição.
+    await bot.process_commands(after)
 
 @bot.event
 async def on_user_update(before, after):
@@ -1451,6 +1443,18 @@ async def volts_pagar(
                 color=COR_ERRO
             )
         )
+        return
+    dados_economia = carregar()
+    if not ja_resgatou_daily(membro.id, dados_economia):
+        embed = discord.Embed(
+            title="⚠️  Daily necessário",
+            description=(
+                f"{membro.mention} precisa resgatar o **Daily de Volts** "
+                "pelo menos uma vez antes de receber transferências."
+            ),
+            color=COR_ERRO
+        )
+        await ctx.send(embed=embed)
         return
     if valor <= 0:
         await ctx.send(
@@ -1687,6 +1691,18 @@ async def roubar(ctx, membro: discord.Member = None):
     dados.setdefault(alvo_id, {"volts": 0, "last_daily": 0})
     dados[uid].setdefault("volts", 0)
     dados[alvo_id].setdefault("volts", 0)
+
+    if not ja_resgatou_daily(membro.id, dados):
+        embed = discord.Embed(
+            title="⚠️  Daily necessário",
+            description=(
+                f"{membro.mention} precisa resgatar o **Daily de Volts** "
+                "pelo menos uma vez antes de poder ser alvo de um roubo."
+            ),
+            color=COR_ERRO
+        )
+        await ctx.send(embed=embed)
+        return
 
     # Limite móvel: no máximo três tentativas dentro das últimas 24 horas.
     usos = dados[uid].get("roubar_usos", [])
@@ -1945,13 +1961,27 @@ async def criar_embed(
     cor: str = None,
     midia: str = None
 ):
+    mensagem = (mensagem or "").strip()
+    midia = (midia or "").strip()
+    if not mensagem and not midia:
+        await interaction.response.send_message(
+            "⚠️ Adicione pelo menos um conteúdo à embed: uma **mensagem** ou uma **imagem**.",
+            ephemeral=True
+        )
+        return
+    if midia and not midia.lower().startswith(("https://", "http://")):
+        await interaction.response.send_message(
+            "❌ O link da imagem precisa começar com http:// ou https://.",
+            ephemeral=True
+        )
+        return
+
     await interaction.response.defer(ephemeral=True)
-    embed = discord.Embed(
-        description=mensagem or "\u200b",
-        color=parse_cor(cor)
-    )
-    if midia and midia.strip().startswith("http"):
-        embed.set_image(url=midia.strip())
+    embed = discord.Embed(color=parse_cor(cor))
+    if mensagem:
+        embed.description = mensagem
+    if midia:
+        embed.set_image(url=midia)
     await interaction.channel.send(embed=embed)
     await interaction.followup.send(
         "✅ Embed enviado!",
