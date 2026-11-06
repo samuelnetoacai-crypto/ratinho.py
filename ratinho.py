@@ -369,7 +369,7 @@ def embed_painel_principal(guild, guild_id):
     e = discord.Embed(
         title="⚙️ Central de Configuração",
         description=(
-            "Gerencie os recursos e as funcionalidades do Ratinho neste servidor.\\n"
+            "Gerencie os recursos e as funcionalidades do Ratinho neste servidor.\n"
             "Selecione uma das categorias disponíveis para consultar informações "
             "e administrar suas respectivas configurações."
         ),
@@ -379,28 +379,28 @@ def embed_painel_principal(guild, guild_id):
         e.set_thumbnail(url=guild.icon.url)
 
     v_logs = (
-        f"▸ **Situação:** {status_txt(cfg['logs']['ativo'])}\\n"
-        f"▸ **Canal de registro:** {canal_txt(cfg['logs']['canal'])}\\n"
+        f"▸ **Situação:** {status_txt(cfg['logs']['ativo'])}\n\n"
+        f"▸ **Canal de registro:** {canal_txt(cfg['logs']['canal'])}\n\n"
         "▸ **Finalidade:** registrar atividades e eventos relevantes do servidor."
     )
     e.add_field(name="📋  Registro de eventos", value=v_logs, inline=False)
 
     v_ticket = (
-        f"▸ **Canal do painel:** {canal_txt(cfg['ticket']['canal_painel'])}\\n"
+        f"▸ **Canal do painel:** {canal_txt(cfg['ticket']['canal_painel'])}\n\n"
         f"▸ **Tipos de atendimento:** {len(cfg['ticket'].get('botoes', []))} configurado(s)"
     )
     e.add_field(name="🎫  Sistema de tickets", value=v_ticket, inline=False)
 
     v_ent = (
-        f"▸ **Situação:** {status_txt(cfg['entrada']['ativo'])}\\n"
-        f"▸ **Canal de publicação:** {canal_txt(cfg['entrada']['canal'])}\\n"
+        f"▸ **Situação:** {status_txt(cfg['entrada']['ativo'])}\n\n"
+        f"▸ **Canal de publicação:** {canal_txt(cfg['entrada']['canal'])}\n\n"
         "▸ **Finalidade:** publicar uma notificação sempre que um membro ingressar no servidor."
     )
     e.add_field(name="👋  Mensagens de entrada", value=v_ent, inline=False)
 
     v_sai = (
-        f"▸ **Situação:** {status_txt(cfg['saida']['ativo'])}\\n"
-        f"▸ **Canal de publicação:** {canal_txt(cfg['saida']['canal'])}\\n"
+        f"▸ **Situação:** {status_txt(cfg['saida']['ativo'])}\n\n"
+        f"▸ **Canal de publicação:** {canal_txt(cfg['saida']['canal'])}\n\n"
         "▸ **Finalidade:** publicar uma notificação sempre que um membro deixar o servidor."
     )
     e.add_field(name="🚪  Mensagens de saída", value=v_sai, inline=False)
