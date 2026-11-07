@@ -1643,16 +1643,18 @@ class BlackjackPartida(discord.ui.View):
         pontos_dealer = bj_total(self.dealer)
         if pontos > 21:
             resultado = "Você estourou! O Ratinho venceu."
+            if self.aposta:
+                add_volts(jogador.id, -self.aposta)
         elif pontos_dealer > 21 or pontos > pontos_dealer:
             resultado = "Você venceu! 🏆"
             if self.aposta:
-                add_volts(jogador.id, self.aposta * 2)
+                add_volts(jogador.id, self.aposta)
         elif pontos == pontos_dealer:
             resultado = "Empate! Sua aposta foi devolvida."
-            if self.aposta:
-                add_volts(jogador.id, self.aposta)
         else:
             resultado = "O Ratinho venceu! 🤖"
+            if self.aposta:
+                add_volts(jogador.id, -self.aposta)
         self.resultado = resultado
 
     def finalizar_pvp(self):
@@ -1728,8 +1730,9 @@ class BlackjackPartida(discord.ui.View):
         if self.encerrado:
             return
         self.encerrado = True
-        # Reembolso se a partida expirar antes de terminar.
-        if self.aposta:
+        # No PvP, as apostas ficam reservadas após a aceitação.
+        # Contra o Ratinho, nada é descontado antes do resultado.
+        if self.aposta and len(self.jogadores) == 2:
             for jogador in self.jogadores:
                 add_volts(jogador.id, self.aposta)
         for item in self.children:
@@ -1779,8 +1782,7 @@ async def blackjack(ctx, valor: str = None, membro: discord.Member = None):
         mensagem += "\nVocê tem 60 segundos para aceitar ou recusar."
         desafio.message = await ctx.send(mensagem, view=desafio)
     else:
-        if aposta:
-            add_volts(ctx.author.id, -aposta)
+        # Contra o Ratinho, a aposta só é debitada se o jogador perder.
         jogo = BlackjackPartida(ctx.author, None, aposta, ctx.author)
         embed = jogo.criar_embed()
         if jogo.encerrado:
