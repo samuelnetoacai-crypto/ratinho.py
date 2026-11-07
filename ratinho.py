@@ -1257,7 +1257,7 @@ async def on_member_join(member):
             f"{member.mention} (`{member.id}`) "
             "entrou no servidor.\n"
             f"Conta criada em: "
-            f"<t:{int(member.created_at.timestamp())}:R>\\n"
+            f"<t:{int(member.created_at.timestamp())}:R>\n"
             + (
                 f"Convidado por: {convite_usado.inviter.mention} "
                 f"(`{convite_usado.inviter.id}`) · Convite: `{convite_usado.code}`"
@@ -1490,15 +1490,317 @@ class PainelRankVolts(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=self)
 
 
+
+# ---------- BLACKJACK ----------
+def bj_valor_carta(carta):
+    return 11 if carta == 1 else min(carta, 10)
+
+def bj_total(mao):
+    total = sum(bj_valor_carta(c) for c in mao)
+    ases = mao.count(1)
+    while total > 21 and ases:
+        total -= 10
+        ases -= 1
+    return total
+
+def bj_comprar():
+    return random.randint(1, 13)
+
+def bj_nome_carta(carta):
+    nomes = {1: "Ás", 11: "Valete", 12: "Dama", 13: "Rei"}
+    return nomes.get(carta, str(carta))
+
+def bj_mostrar_mao(mao):
+    return " · ".join(bj_nome_carta(c) for c in mao) + f"  (**{bj_total(mao)}**)"
+
+def bj_parse_valor(texto):
+    if texto is None:
+        return 0
+    texto = texto.strip().lower().replace(".", "").replace(",", "")
+    multiplicador = 1
+    if texto.endswith("k"):
+        multiplicador = 1_000
+        texto = texto[:-1]
+    elif texto.endswith("m"):
+        multiplicador = 1_000_000
+        texto = texto[:-1]
+    if not texto.isdigit():
+        raise ValueError
+    return int(texto) * multiplicador
+
+
+class BlackjackDesafio(discord.ui.View):
+    def __init__(self, desafiante, adversario, aposta):
+        super().__init__(timeout=60)
+        self.desafiante = desafiante
+        self.adversario = adversario
+        self.aposta = aposta
+        self.ctx = None
+        self.message = None
+
+    @discord.ui.button(label="Aceitar", emoji="✅", style=discord.ButtonStyle.success)
+    async def aceitar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.adversario.id:
+            await interaction.response.send_message("Este desafio não é para você.", ephemeral=True)
+            return
+        if self.aposta and get_volts(self.desafiante.id) < self.aposta:
+            await interaction.response.edit_message(content="❌ O desafiante não tem mais saldo suficiente. Desafio cancelado.", embed=None, view=None)
+            self.stop()
+            return
+        if self.aposta and get_volts(self.adversario.id) < self.aposta:
+            await interaction.response.edit_message(content="❌ Você não tem Volts suficientes para cobrir essa aposta.", embed=None, view=None)
+            self.stop()
+            return
+
+        if self.aposta:
+            add_volts(self.desafiante.id, -self.aposta)
+            add_volts(self.adversario.id, -self.aposta)
+
+        jogo = BlackjackPartida(self.desafiante, self.adversario, self.aposta, interaction.user)
+        embed = jogo.criar_embed()
+        if jogo.encerrado:
+            embed.add_field(name="Resultado", value=jogo.resultado, inline=False)
+            for item in jogo.children:
+                item.disabled = True
+        await interaction.response.edit_message(content=None, embed=embed, view=jogo)
+        jogo.message = interaction.message
+        self.stop()
+
+    @discord.ui.button(label="Recusar", emoji="✖️", style=discord.ButtonStyle.danger)
+    async def recusar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.adversario.id:
+            await interaction.response.send_message("Somente a pessoa desafiada pode recusar.", ephemeral=True)
+            return
+        await interaction.response.edit_message(content="❌ Desafio recusado.", embed=None, view=None)
+        self.stop()
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(content="⌛ O desafio de Blackjack expirou.", view=self)
+            except discord.HTTPException:
+                pass
+
+
+class BlackjackPartida(discord.ui.View):
+    def __init__(self, jogador1, jogador2, aposta, primeiro):
+        super().__init__(timeout=180)
+        self.jogadores = [jogador1, jogador2]
+        self.aposta = aposta
+        self.maos = {jogador1.id: [bj_comprar(), bj_comprar()],
+                     jogador2.id: [bj_comprar(), bj_comprar()] if jogador2 else []}
+        self.dealer = [bj_comprar(), bj_comprar()] if jogador2 is None else []
+        self.vez = primeiro.id
+        self.parados = set()
+        self.encerrado = False
+        self.message = None
+        if jogador2 is None:
+            self.jogadores = [jogador1]
+            if bj_total(self.maos[jogador1.id]) == 21:
+                self.finalizar_bot()
+        else:
+            if bj_total(self.maos[jogador1.id]) == 21:
+                self.parados.add(jogador1.id)
+                self.vez = jogador2.id
+            if bj_total(self.maos[jogador2.id]) == 21:
+                self.parados.add(jogador2.id)
+            if len(self.parados) == 2:
+                self.finalizar_pvp()
+
+    def criar_embed(self):
+        embed = discord.Embed(title="🃏 Blackjack — 21", color=COR_PRINCIPAL)
+        embed.add_field(name=self.jogadores[0].display_name,
+                        value=bj_mostrar_mao(self.maos[self.jogadores[0].id]), inline=False)
+        if len(self.jogadores) == 2:
+            embed.add_field(name=self.jogadores[1].display_name,
+                            value=bj_mostrar_mao(self.maos[self.jogadores[1].id]), inline=False)
+            embed.description = f"Vez de {self.mencionar_vez()}."
+        else:
+            dealer_texto = bj_nome_carta(self.dealer[0]) + " · 🂠"
+            embed.add_field(name="Ratinho 🤖", value=dealer_texto, inline=False)
+            embed.description = "Use **Pedir carta** para comprar ou **Parar** para encerrar sua vez."
+        embed.add_field(name="Aposta", value=fmt_volts(self.aposta) if self.aposta else "Partida amistosa — sem aposta", inline=False)
+        return embed
+
+    def mencionar_vez(self):
+        jogador = next((j for j in self.jogadores if j.id == self.vez), None)
+        return jogador.mention if jogador else "—"
+
+    async def atualizar(self, interaction):
+        if self.encerrado:
+            await interaction.response.edit_message(embed=self.criar_embed(), view=self)
+        else:
+            await interaction.response.edit_message(embed=self.criar_embed(), view=self)
+
+    def finalizar_bot(self):
+        self.encerrado = True
+        while bj_total(self.dealer) < 17:
+            self.dealer.append(bj_comprar())
+        jogador = self.jogadores[0]
+        pontos = bj_total(self.maos[jogador.id])
+        pontos_dealer = bj_total(self.dealer)
+        if pontos > 21:
+            resultado = "Você estourou! O Ratinho venceu."
+        elif pontos_dealer > 21 or pontos > pontos_dealer:
+            resultado = "Você venceu! 🏆"
+            if self.aposta:
+                add_volts(jogador.id, self.aposta * 2)
+        elif pontos == pontos_dealer:
+            resultado = "Empate! Sua aposta foi devolvida."
+            if self.aposta:
+                add_volts(jogador.id, self.aposta)
+        else:
+            resultado = "O Ratinho venceu! 🤖"
+        self.resultado = resultado
+
+    def finalizar_pvp(self):
+        self.encerrado = True
+        a, b = self.jogadores
+        pa, pb = bj_total(self.maos[a.id]), bj_total(self.maos[b.id])
+        if pa > 21:
+            vencedor = b
+        elif pb > 21:
+            vencedor = a
+        elif pa > pb:
+            vencedor = a
+        elif pb > pa:
+            vencedor = b
+        else:
+            vencedor = None
+        if vencedor:
+            resultado = f"🏆 {vencedor.mention} venceu e levou a aposta!"
+            if self.aposta:
+                add_volts(vencedor.id, self.aposta * 2)
+        else:
+            resultado = "🤝 Empate! As apostas foram devolvidas."
+            if self.aposta:
+                add_volts(a.id, self.aposta)
+                add_volts(b.id, self.aposta)
+        self.resultado = resultado
+
+    @discord.ui.button(label="Pedir carta", emoji="🃏", style=discord.ButtonStyle.primary)
+    async def pedir(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.encerrado or interaction.user.id != self.vez:
+            await interaction.response.send_message("Não é sua vez de jogar.", ephemeral=True)
+            return
+        mao = self.maos[self.vez]
+        mao.append(bj_comprar())
+        if bj_total(mao) >= 21:
+            self.parados.add(self.vez)
+            if len(self.jogadores) == 1:
+                self.finalizar_bot()
+            else:
+                self.proxima_vez()
+        await self.responder_jogada(interaction)
+
+    @discord.ui.button(label="Parar", emoji="✋", style=discord.ButtonStyle.secondary)
+    async def parar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.encerrado or interaction.user.id != self.vez:
+            await interaction.response.send_message("Não é sua vez de jogar.", ephemeral=True)
+            return
+        self.parados.add(self.vez)
+        if len(self.jogadores) == 1:
+            self.finalizar_bot()
+        else:
+            self.proxima_vez()
+        await self.responder_jogada(interaction)
+
+    def proxima_vez(self):
+        for jogador in self.jogadores:
+            if jogador.id not in self.parados:
+                self.vez = jogador.id
+                return
+        self.finalizar_pvp()
+
+    async def responder_jogada(self, interaction):
+        embed = self.criar_embed()
+        if self.encerrado:
+            if len(self.jogadores) == 1:
+                embed.add_field(name="Ratinho 🤖", value=bj_mostrar_mao(self.dealer), inline=False)
+            embed.add_field(name="Resultado", value=self.resultado, inline=False)
+            for item in self.children:
+                item.disabled = True
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def on_timeout(self):
+        if self.encerrado:
+            return
+        self.encerrado = True
+        # Reembolso se a partida expirar antes de terminar.
+        if self.aposta:
+            for jogador in self.jogadores:
+                add_volts(jogador.id, self.aposta)
+        for item in self.children:
+            item.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(content="⌛ Partida encerrada por inatividade. As apostas foram devolvidas.", view=self)
+            except discord.HTTPException:
+                pass
+
+
+@bot.command(name="bj")
+async def blackjack(ctx, valor: str = None, membro: discord.Member = None):
+    # Permite também o formato vbj @pessoa, sem valor apostado.
+    if valor and membro is None:
+        achou = re.fullmatch(r"<@!?(\d+)>", valor)
+        if achou:
+            membro = ctx.guild.get_member(int(achou.group(1)))
+            valor = None
+
+    try:
+        aposta = bj_parse_valor(valor)
+    except ValueError:
+        await ctx.send("❌ Valor inválido. Exemplo: `vbj 200k` ou `vbj 200k @pessoa`.")
+        return
+
+    if aposta < 0:
+        await ctx.send("❌ A aposta não pode ser negativa.")
+        return
+    if membro and membro.id == ctx.author.id:
+        await ctx.send("❌ Você não pode jogar Blackjack contra si mesmo.")
+        return
+    if membro and membro.bot:
+        await ctx.send("❌ Você só pode desafiar pessoas, não outros bots.")
+        return
+    if aposta and get_volts(ctx.author.id) < aposta:
+        await ctx.send(f"❌ Você precisa ter pelo menos {fmt_volts(aposta)} para apostar.")
+        return
+
+    if membro:
+        if aposta and get_volts(membro.id) < aposta:
+            await ctx.send(f"❌ {membro.mention} não tem Volts suficientes para cobrir essa aposta.")
+            return
+        desafio = BlackjackDesafio(ctx.author, membro, aposta)
+        mensagem = f"🃏 {membro.mention}, {ctx.author.mention} te desafiou para uma partida de Blackjack!"
+        mensagem += f"\nAposta: **{aposta:,} Volts para cada um**.".replace(",", ".") if aposta else "\nPartida amistosa, sem aposta."
+        mensagem += "\nVocê tem 60 segundos para aceitar ou recusar."
+        desafio.message = await ctx.send(mensagem, view=desafio)
+    else:
+        if aposta:
+            add_volts(ctx.author.id, -aposta)
+        jogo = BlackjackPartida(ctx.author, None, aposta, ctx.author)
+        embed = jogo.criar_embed()
+        if jogo.encerrado:
+            embed.add_field(name="Ratinho 🤖", value=bj_mostrar_mao(jogo.dealer), inline=False)
+            embed.add_field(name="Resultado", value=jogo.resultado, inline=False)
+            for item in jogo.children:
+                item.disabled = True
+        jogo.message = await ctx.send(embed=embed, view=jogo)
+
+
+
 # ============================================================
 #  6. COMANDOS
 # ============================================================
 @bot.hybrid_command(
-    name="vrank",
+    name="rank",
     description="Mostra o ranking global e local de Volts"
 )
 @commands.guild_only()
-async def vrank(ctx):
+async def rank(ctx):
     embed = discord.Embed(
         title="⚡ Ranking de Volts",
         description=(
@@ -2267,7 +2569,7 @@ async def on_message(message):
         embed.add_field(
             name="Exemplo",
             value=(
-                "`v atm` • `v daily` • `v vrank` • "
+                "`v atm` • `v daily` • `vrank` • "
                 "`v volts pagar @usuário 100` • "
                 "`v configurar`"
             ),
