@@ -356,10 +356,27 @@ class ConfirmarPagamento(discord.ui.View):
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
+intents.invites = True
 bot = commands.Bot(
-    command_prefix="v",
+    command_prefix=["v", "V"],
     intents=intents
 )
+
+# Cache local dos convites para identificar quem trouxe cada novo membro.
+convites_cache = {}
+
+
+async def atualizar_cache_convites(guild):
+    """Atualiza os usos dos convites; requer permissão para gerenciar convites."""
+    try:
+        convites = await guild.invites()
+        convites_cache[guild.id] = {
+            convite.code: convite.uses or 0 for convite in convites
+        }
+    except (discord.Forbidden, discord.HTTPException) as erro:
+        print(f"Não foi possível consultar convites de {guild.name}: {erro}")
+        convites_cache.pop(guild.id, None)
+
 
 # ============================================================
 #  EMBEDS DO PAINEL CONFIGURAR - ORGANIZADOS
@@ -1158,6 +1175,7 @@ async def on_ready():
             bot.add_view(TicketAbrirView(guild.id))
         except Exception as e:
             print(f"Erro ao registrar painel de tickets de {guild.id}: {e}")
+        await atualizar_cache_convites(guild)
     try:
         synced = await bot.tree.sync()
         print(f"Sincronizados {len(synced)} comandos slash!")
@@ -1172,6 +1190,7 @@ async def on_ready():
 
 @bot.event
 async def on_guild_join(guild):
+    await atualizar_cache_convites(guild)
     await bot.change_presence(
         status=discord.Status.idle,
         activity=discord.CustomActivity(
@@ -1189,7 +1208,31 @@ async def on_guild_remove(guild):
     )
 
 @bot.event
+async def on_invite_create(invite):
+    convites_cache.setdefault(invite.guild.id, {})[invite.code] = invite.uses or 0
+
+
+@bot.event
+async def on_invite_delete(invite):
+    convites_cache.setdefault(invite.guild.id, {}).pop(invite.code, None)
+
+
+@bot.event
 async def on_member_join(member):
+    convite_usado = None
+    try:
+        convites_atuais = await member.guild.invites()
+        cache_anterior = convites_cache.get(member.guild.id, {})
+        for convite in convites_atuais:
+            if (convite.uses or 0) > cache_anterior.get(convite.code, 0):
+                convite_usado = convite
+                break
+        convites_cache[member.guild.id] = {
+            convite.code: convite.uses or 0 for convite in convites_atuais
+        }
+    except (discord.Forbidden, discord.HTTPException) as erro:
+        print(f"Não foi possível identificar o convite usado em {member.guild.name}: {erro}")
+
     cfg = get_guild_config(member.guild.id)
     if cfg["entrada"]["ativo"] and cfg["entrada"]["canal"]:
         canal = member.guild.get_channel(cfg["entrada"]["canal"])
@@ -1214,7 +1257,13 @@ async def on_member_join(member):
             f"{member.mention} (`{member.id}`) "
             "entrou no servidor.\n"
             f"Conta criada em: "
-            f"<t:{int(member.created_at.timestamp())}:R>"
+            f"<t:{int(member.created_at.timestamp())}:R>\\n"
+            + (
+                f"Convidado por: {convite_usado.inviter.mention} "
+                f"(`{convite_usado.inviter.id}`) · Convite: `{convite_usado.code}`"
+                if convite_usado and convite_usado.inviter
+                else "Convite utilizado: não identificado"
+            )
         ),
         COR_SUCESSO
     )
@@ -1335,9 +1384,136 @@ async def on_member_unban(guild, user):
         COR_SUCESSO
     )
 
+class PainelRankVolts(discord.ui.View):
+    def __init__(self, guild, solicitante):
+        super().__init__(timeout=300)
+        self.guild = guild
+        self.solicitante = solicitante
+
+    async def criar_embed_global(self):
+        dados = carregar()
+        contas = []
+        for uid, conta in dados.items():
+            try:
+                saldo = int(conta.get("volts", 0))
+                user_id = int(uid)
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if saldo > 0:
+                contas.append((user_id, saldo))
+
+        contas.sort(key=lambda item: item[1], reverse=True)
+        contas = contas[:10]
+
+        embed = discord.Embed(
+            title="🌎 Ranking Global de Volts",
+            description=(
+                "Os **10 usuários** com mais Volts no banco global do Ratinho.\n"
+                "O saldo é compartilhado entre os servidores."
+            ),
+            color=COR_PRINCIPAL,
+            timestamp=discord.utils.utcnow()
+        )
+
+        if not contas:
+            embed.description += "\n\nAinda não há usuários com Volts registrados."
+            return embed
+
+        linhas = []
+        medalhas = ["🥇", "🥈", "🥉"]
+        membros_cache = {}
+        for guild in bot.guilds:
+            for membro in guild.members:
+                membros_cache[membro.id] = membro
+
+        for posicao, (user_id, saldo) in enumerate(contas, start=1):
+            usuario = membros_cache.get(user_id) or bot.get_user(user_id)
+            if usuario is None:
+                try:
+                    usuario = await bot.fetch_user(user_id)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    usuario = None
+            nome = usuario.display_name if isinstance(usuario, discord.Member) else (usuario.name if usuario else f"Usuário {user_id}")
+            medalha = medalhas[posicao - 1] if posicao <= 3 else f"**{posicao}.**"
+            linhas.append(f"{medalha} **{discord.utils.escape_markdown(nome)}** — {fmt_volts(saldo)}")
+
+        embed.add_field(name="Classificação", value="\n".join(linhas), inline=False)
+        embed.set_footer(text=f"Solicitado por {self.solicitante.display_name} • Ranking global")
+        return embed
+
+    def criar_embed_local(self):
+        dados = carregar()
+        contas = []
+        for membro in self.guild.members:
+            if membro.bot:
+                continue
+            conta = dados.get(str(membro.id), {})
+            try:
+                saldo = int(conta.get("volts", 0))
+            except (TypeError, ValueError, AttributeError):
+                saldo = 0
+            if saldo > 0:
+                contas.append((membro, saldo))
+
+        contas.sort(key=lambda item: item[1], reverse=True)
+        contas = contas[:10]
+        embed = discord.Embed(
+            title=f"🏠 Ranking de Volts — {self.guild.name}",
+            description="Os **10 usuários** com mais Volts neste servidor.",
+            color=COR_PRINCIPAL,
+            timestamp=discord.utils.utcnow()
+        )
+
+        if not contas:
+            embed.description += "\n\nAinda não há membros com Volts registrados neste servidor."
+        else:
+            linhas = []
+            medalhas = ["🥇", "🥈", "🥉"]
+            for posicao, (membro, saldo) in enumerate(contas, start=1):
+                medalha = medalhas[posicao - 1] if posicao <= 3 else f"**{posicao}.**"
+                linhas.append(f"{medalha} **{discord.utils.escape_markdown(membro.display_name)}** — {fmt_volts(saldo)}")
+            embed.add_field(name="Classificação", value="\n".join(linhas), inline=False)
+
+        embed.set_thumbnail(url=self.guild.icon.url if self.guild.icon else self.solicitante.display_avatar.url)
+        embed.set_footer(text=f"Solicitado por {self.solicitante.display_name} • Ranking local")
+        return embed
+
+    @discord.ui.button(label="Global", emoji="🌎", style=discord.ButtonStyle.primary)
+    async def global_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        embed = await self.criar_embed_global()
+        await interaction.edit_original_response(embed=embed, view=self)
+
+    @discord.ui.button(label="Local", emoji="🏠", style=discord.ButtonStyle.secondary)
+    async def local_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = self.criar_embed_local()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+
 # ============================================================
 #  6. COMANDOS
 # ============================================================
+@bot.hybrid_command(
+    name="vrank",
+    description="Mostra o ranking global e local de Volts"
+)
+@commands.guild_only()
+async def vrank(ctx):
+    embed = discord.Embed(
+        title="⚡ Ranking de Volts",
+        description=(
+            "Escolha qual classificação deseja consultar usando os botões abaixo.\n\n"
+            "🌎 **Global:** os usuários com mais Volts no banco global do Ratinho.\n"
+            "🏠 **Local:** os usuários com mais Volts neste servidor."
+        ),
+        color=COR_PRINCIPAL,
+        timestamp=discord.utils.utcnow()
+    )
+    embed.set_footer(text=f"Solicitado por {ctx.author.display_name}")
+    view = PainelRankVolts(ctx.guild, ctx.author)
+    await ctx.send(embed=embed, view=view)
+
+
 @bot.hybrid_command(
     name="atm",
     description="Consulta o saldo de volts"
@@ -1886,28 +2062,70 @@ async def desmutar(ctx, membro: discord.Member):
     except discord.HTTPException:
         await ctx.send("❌ Não foi possível desmutar esse membro.", delete_after=8)
 
-@bot.hybrid_command(name="clear", description="Apaga mensagens do canal")
+@bot.hybrid_command(name="clear", description="Apaga até 1.000 mensagens do canal")
 @app_commands.default_permissions(manage_messages=True)
 @commands.has_permissions(manage_messages=True)
-async def clear(ctx, quantidade: app_commands.Range[int, 1, 100] = 100):
+async def clear(ctx, quantidade: app_commands.Range[int, 1, 1000] = 100):
     if ctx.guild is None:
         return
+
     try:
         if ctx.interaction:
             await ctx.interaction.response.defer(ephemeral=True)
-        await ctx.channel.purge(limit=quantidade + (0 if ctx.interaction else 1), check=lambda m: not m.pinned)
+
+        # No comando por prefixo, inclui a própria mensagem do comando
+        # na busca para removê-la junto, sem contar como mensagem apagada.
+        limite_busca = quantidade if ctx.interaction else quantidade + 1
+        apagadas = await ctx.channel.purge(
+            limit=limite_busca,
+            check=lambda mensagem: not mensagem.pinned
+        )
+
+        total_apagado = sum(
+            1 for mensagem in apagadas
+            if ctx.interaction or mensagem.id != ctx.message.id
+        )
+
+        resposta = f"🧹 Foram apagadas **{total_apagado}** mensagem(ns)."
         if ctx.interaction:
-            await ctx.interaction.delete_original_response()
+            await ctx.followup.send(resposta, ephemeral=True)
+        else:
+            await ctx.send(resposta, delete_after=8)
+
     except discord.Forbidden:
+        mensagem_erro = "❌ Não tenho permissão para apagar mensagens. Verifique se possuo **Gerenciar mensagens**."
         if ctx.interaction:
-            await ctx.followup.send("❌ Não tenho permissão para apagar mensagens.", ephemeral=True)
+            await ctx.followup.send(mensagem_erro, ephemeral=True)
         else:
-            await ctx.send("❌ Não tenho permissão para apagar mensagens.", delete_after=8)
-    except discord.HTTPException:
+            await ctx.send(mensagem_erro, delete_after=10)
+    except discord.HTTPException as erro:
+        print(f"Erro no comando clear: {erro}")
+        mensagem_erro = "❌ Não foi possível apagar as mensagens. Verifique minhas permissões e tente novamente."
         if ctx.interaction:
-            await ctx.followup.send("❌ Não foi possível apagar as mensagens.", ephemeral=True)
+            await ctx.followup.send(mensagem_erro, ephemeral=True)
         else:
-            await ctx.send("❌ Não foi possível apagar as mensagens.", delete_after=8)
+            await ctx.send(mensagem_erro, delete_after=10)
+
+@clear.error
+async def clear_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        mensagem = "❌ Você precisa da permissão **Gerenciar mensagens** para usar este comando."
+    elif isinstance(error, commands.BotMissingPermissions):
+        mensagem = "❌ O Ratinho precisa da permissão **Gerenciar mensagens** neste canal."
+    else:
+        print(f"Erro ao executar clear: {error}")
+        mensagem = "❌ Ocorreu um erro ao executar o comando clear. Verifique as permissões e tente novamente."
+
+    try:
+        if ctx.interaction:
+            if not ctx.interaction.response.is_done():
+                await ctx.interaction.response.send_message(mensagem, ephemeral=True)
+            else:
+                await ctx.followup.send(mensagem, ephemeral=True)
+        else:
+            await ctx.send(mensagem, delete_after=10)
+    except discord.HTTPException as erro:
+        print(f"Não foi possível enviar o erro do clear: {erro}")
 
 @bot.hybrid_command(
     name="configurar",
@@ -1946,29 +2164,36 @@ async def configurar_error(ctx, error):
 
 @bot.tree.command(
     name="embed",
-    description="Cria um embed personalizado (só ADM)"
+    description="Cria uma mensagem com embed personalizada (só ADM)"
 )
 @app_commands.default_permissions(administrator=True)
 @app_commands.checks.has_permissions(administrator=True)
+@app_commands.rename(mensagem_embed="mensagem-embed")
 @app_commands.describe(
-    mensagem="Texto principal do embed (opcional)",
+    mensagem="Texto que aparece acima e fora da embed (opcional)",
+    mensagem_embed="Texto que aparece dentro da embed (opcional)",
     cor="Cor: nome ou #hex. Se vazio, fica amarelo",
     midia="Link de imagem (opcional)"
 )
 async def criar_embed(
     interaction: discord.Interaction,
     mensagem: str = None,
+    mensagem_embed: str = None,
     cor: str = None,
     midia: str = None
 ):
     mensagem = (mensagem or "").strip()
+    mensagem_embed = (mensagem_embed or "").strip()
     midia = (midia or "").strip()
-    if not mensagem and not midia:
+
+    if not mensagem and not mensagem_embed and not midia:
         await interaction.response.send_message(
-            "⚠️ Adicione pelo menos um conteúdo à embed: uma **mensagem** ou uma **imagem**.",
+            "⚠️ Adicione pelo menos um conteúdo: uma **mensagem**, "
+            "uma **mensagem-embed** ou uma **imagem**.",
             ephemeral=True
         )
         return
+
     if midia and not midia.lower().startswith(("https://", "http://")):
         await interaction.response.send_message(
             "❌ O link da imagem precisa começar com http:// ou https://.",
@@ -1978,13 +2203,18 @@ async def criar_embed(
 
     await interaction.response.defer(ephemeral=True)
     embed = discord.Embed(color=parse_cor(cor))
-    if mensagem:
-        embed.description = mensagem
+
+    if mensagem_embed:
+        embed.description = mensagem_embed
     if midia:
         embed.set_image(url=midia)
-    await interaction.channel.send(embed=embed)
+
+    await interaction.channel.send(
+        content=mensagem or None,
+        embed=embed if mensagem_embed or midia else None
+    )
     await interaction.followup.send(
-        "✅ Embed enviado!",
+        "✅ Mensagem enviada!",
         ephemeral=True
     )
 
@@ -2037,7 +2267,7 @@ async def on_message(message):
         embed.add_field(
             name="Exemplo",
             value=(
-                "`v atm` • `v daily` • "
+                "`v atm` • `v daily` • `v vrank` • "
                 "`v volts pagar @usuário 100` • "
                 "`v configurar`"
             ),
