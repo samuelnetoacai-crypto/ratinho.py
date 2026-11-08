@@ -1511,7 +1511,9 @@ def bj_nome_carta(carta):
     return str(10 if carta >= 10 else carta)
 
 def bj_mostrar_mao(mao):
-    return " · ".join(bj_nome_carta(c) for c in mao) + f"  (**{bj_total(mao)}**)"
+    total = bj_total(mao)
+    total_formatado = f"~~({total})~~" if total > 21 else f"({total})"
+    return " · ".join(bj_nome_carta(c) for c in mao) + f"  {total_formatado}"
 
 def bj_parse_valor(texto):
     if texto is None:
@@ -1527,6 +1529,41 @@ def bj_parse_valor(texto):
     if not texto.isdigit():
         raise ValueError
     return int(texto) * multiplicador
+
+
+def bj_proxima_partida():
+    """Incrementa um contador persistente de partidas, inclusive após reinícios."""
+    if UPSTASH_URL and UPSTASH_TOKEN:
+        try:
+            req = urllib.request.Request(
+                f"{UPSTASH_URL.rstrip('/')}/incr/blackjack_counter",
+                headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5) as res:
+                data = json.loads(res.read())
+            numero = data.get("result")
+            if isinstance(numero, int):
+                return numero
+            raise ValueError("Resposta inválida do contador no Upstash")
+        except Exception as e:
+            print(f"Erro ao incrementar contador do Blackjack no Upstash: {e}")
+
+    arquivo = "blackjack_counter.json"
+    try:
+        with open(arquivo, "r", encoding="utf-8") as f:
+            dados = json.load(f)
+        atual = int(dados.get("total", 0))
+    except (FileNotFoundError, ValueError, TypeError, json.JSONDecodeError):
+        atual = 0
+
+    proximo = atual + 1
+    try:
+        with open(arquivo, "w", encoding="utf-8") as f:
+            json.dump({"total": proximo}, f)
+    except OSError as e:
+        print(f"Erro ao salvar contador local do Blackjack: {e}")
+    return proximo
 
 
 class BlackjackDesafio(discord.ui.View):
@@ -1595,6 +1632,7 @@ class BlackjackDesafio(discord.ui.View):
 class BlackjackPartida(discord.ui.View):
     def __init__(self, jogador1, jogador2, aposta, primeiro):
         super().__init__(timeout=300)
+        self.numero_partida = bj_proxima_partida()
         self.jogadores = [jogador1] if jogador2 is None else [jogador1, jogador2]
         self.aposta = aposta
         self.maos = {jogador1.id: [bj_comprar(), bj_comprar()]}
@@ -1636,21 +1674,21 @@ class BlackjackPartida(discord.ui.View):
             descricao = "Partida encerrada. Confira o resultado abaixo."
 
         embed = discord.Embed(
-            title="🃏 BLACKJACK • 21",
+            title="BLACK JACK • 21",
             description=descricao,
             color=cor
         )
 
         for indice, jogador in enumerate(self.jogadores):
-            if indice == 0:
-                nome = "👤 Você"
-            else:
-                nome = f"👤 {discord.utils.escape_markdown(jogador.display_name)}"
+            nome = "👤 Você" if indice == 0 else f"👤 Oponente — {discord.utils.escape_markdown(jogador.display_name)}"
             total = bj_total(self.maos[jogador.id])
-            estado = " — ESTOUROU" if total > 21 else (" — PAROU" if jogador.id in self.parados and not self.encerrado else "")
+            estado = " — ESTOUROU" if total > 21 else (
+                " — PAROU" if jogador.id in self.parados and not self.encerrado else ""
+            )
+            valor_mao = bj_mostrar_mao(self.maos[jogador.id])
             embed.add_field(
                 name=f"{nome}{estado}",
-                value=bj_mostrar_mao(self.maos[jogador.id]),
+                value=valor_mao,
                 inline=False
             )
 
@@ -1659,21 +1697,30 @@ class BlackjackPartida(discord.ui.View):
                 dealer_texto = bj_mostrar_mao(self.dealer)
             else:
                 dealer_texto = f"{bj_nome_carta(self.dealer[0])} · Carta oculta"
-            embed.add_field(name="🤖 Ratinho", value=dealer_texto, inline=False)
-        else:
-            if not self.encerrado:
-                atual = next((j for j in self.jogadores if j.id == self.vez), None)
-                nome_atual = "Você" if atual and atual.id == self.jogadores[0].id else (atual.display_name if atual else "—")
-                embed.add_field(name="⏳ Vez de jogar", value=f"**{discord.utils.escape_markdown(nome_atual)}**", inline=False)
+            embed.add_field(name="⚡ Ratinho", value=dealer_texto, inline=False)
+        elif not self.encerrado:
+            atual = next((j for j in self.jogadores if j.id == self.vez), None)
+            nome_atual = "Você" if atual and atual.id == self.jogadores[0].id else "Oponente"
+            embed.add_field(name="⏳ Vez de jogar", value=nome_atual, inline=False)
 
+        valor_aposta = (
+            f"{fmt_volts(self.aposta).replace(chr(42), '')} para cada participante"
+            if self.aposta else
+            "Partida amistosa — sem movimentação de Volts"
+        )
         embed.add_field(
             name="💰 Valor da aposta",
-            value=f"**{fmt_volts(self.aposta)}** para cada participante" if self.aposta else "Partida amistosa — sem movimentação de Volts",
+            value=valor_aposta,
             inline=False
         )
         if self.encerrado and self.resultado:
-            embed.add_field(name="🏁 Resultado final", value=f"**{self.resultado}**", inline=False)
-        # Sem rodapé/timestamp: mantém a embed limpa e objetiva.
+            embed.add_field(
+                name="🏁 Resultado final",
+                value=self.resultado,
+                inline=False
+            )
+
+        embed.set_footer(text=f"Partida de Blackjack n° {self.numero_partida}")
         return embed
 
     def preparar_encerramento(self):
