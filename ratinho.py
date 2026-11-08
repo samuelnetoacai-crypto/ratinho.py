@@ -1589,8 +1589,11 @@ class BlackjackPartida(discord.ui.View):
         super().__init__(timeout=180)
         self.jogadores = [jogador1, jogador2]
         self.aposta = aposta
-        self.maos = {jogador1.id: [bj_comprar(), bj_comprar()],
-                     jogador2.id: [bj_comprar(), bj_comprar()] if jogador2 else []}
+        self.maos = {
+            jogador1.id: [bj_comprar(), bj_comprar()]
+        }
+        if jogador2 is not None:
+            self.maos[jogador2.id] = [bj_comprar(), bj_comprar()]
         self.dealer = [bj_comprar(), bj_comprar()] if jogador2 is None else []
         self.vez = primeiro.id
         self.parados = set()
