@@ -1744,7 +1744,14 @@ class BlackjackPartida(discord.ui.View):
                 pass
 
 
-@bot.command(name="bj")
+@bot.hybrid_command(
+    name="bj",
+    description="Joga Blackjack apostando Volts ou por diversão"
+)
+@app_commands.describe(
+    valor="Quantidade de Volts para apostar (opcional; aceita 200k)",
+    membro="Pessoa para desafiar (opcional; sem pessoa, joga contra o Ratinho)"
+)
 async def blackjack(ctx, valor: str = None, membro: discord.Member = None):
     # Permite também o formato vbj @pessoa, sem valor apostado.
     if valor and membro is None:
