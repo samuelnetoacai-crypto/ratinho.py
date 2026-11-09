@@ -209,6 +209,17 @@ def get_guild_config(guild_id):
         item.setdefault("nome", "Suporte")
         item.setdefault("cor", "azul")
         item.setdefault("cargo_suporte", ticket_cfg.get("cargo_suporte"))
+
+    # Painel independente de cargos por menu de seleção.
+    painel_cargos = dados[gid].setdefault("painel_cargos", {})
+    painel_cargos.setdefault("canal", None)
+    painel_cargos.setdefault("mensagem", "Escolha abaixo os cargos que deseja receber.")
+    painel_cargos.setdefault("mensagem_embed", "")
+    painel_cargos.setdefault("cargos", [])
+    painel_cargos.setdefault("cor_embed", "#5865F2")
+    painel_cargos.setdefault("cor_botoes", "cinza")
+    painel_cargos.setdefault("rodape", "")
+    painel_cargos.setdefault("modo", 1)
     return dados[gid]
 
 def update_guild_config(guild_id, nova):
@@ -638,6 +649,8 @@ class SelectCanalView(discord.ui.View):
             cfg["ticket"]["canal_painel"] = int(canal)
         elif self.destino == "ticket_categoria":
             cfg["ticket"]["categoria"] = int(canal)
+        elif self.destino == "painel_cargos":
+            cfg["painel_cargos"]["canal"] = int(canal)
         elif self.destino in ["entrada", "saida"]:
             cfg[self.destino]["canal"] = int(canal)
         update_guild_config(self.guild_id, cfg)
@@ -759,7 +772,7 @@ class ModalBotaoTicket(discord.ui.Modal):
             botao["nome"], botao["cor"] = self.nome.value.strip(), cor_escolhida
         else:
             if len(botoes) >= 25:
-                await interaction.response.send_message("❌ O Discord permite no máximo 25 botões por painel.", ephemeral=True)
+                await interaction.response.send_message("❌ O Discord permite no máximo 25 opções no menu de tickets.", ephemeral=True)
                 return
             botao = {"id": uuid.uuid4().hex[:10], "nome": self.nome.value.strip(), "cor": cor_escolhida, "cargo_suporte": None}
             botoes.append(botao)
@@ -824,7 +837,7 @@ class SelectGerenciarBotaoTicketView(discord.ui.View):
 
     async def selecionar(self, interaction):
         await interaction.response.send_message(
-            "O que deseja fazer com esse botão?",
+            "O que deseja fazer com essa opção?",
             view=GerenciarBotaoTicketView(self.guild_id, interaction.data["values"][0]),
             ephemeral=True
         )
@@ -855,16 +868,16 @@ class TicketView(discord.ui.View):
     async def personalizar_rodape(self, interaction, button):
         await interaction.response.send_modal(ModalRodapeTicket(self.guild_id))
 
-    @discord.ui.button(label="Adicionar botão", style=discord.ButtonStyle.secondary, emoji="➕", row=1)
+    @discord.ui.button(label="Adicionar opção", style=discord.ButtonStyle.secondary, emoji="➕", row=1)
     async def adicionar(self, interaction, button):
         await interaction.response.send_modal(ModalBotaoTicket(self.guild_id))
 
-    @discord.ui.button(label="Gerenciar botões", style=discord.ButtonStyle.secondary, emoji="🛠️", row=1)
+    @discord.ui.button(label="Gerenciar opções", style=discord.ButtonStyle.secondary, emoji="🛠️", row=1)
     async def gerenciar(self, interaction, button):
         if not get_guild_config(self.guild_id)["ticket"].get("botoes"):
-            await interaction.response.send_message("Você ainda não criou botões.", ephemeral=True)
+            await interaction.response.send_message("Você ainda não criou opções de ticket.", ephemeral=True)
             return
-        await interaction.response.send_message("Selecione um botão para editar, trocar o cargo ou excluir:", view=SelectGerenciarBotaoTicketView(self.guild_id), ephemeral=True)
+        await interaction.response.send_message("Selecione uma opção para editar, trocar o cargo responsável ou excluir:", view=SelectGerenciarBotaoTicketView(self.guild_id), ephemeral=True)
 
     @discord.ui.button(label="Enviar Painel", style=discord.ButtonStyle.secondary, emoji="📤", row=2)
     async def enviar(self, interaction, button):
@@ -873,7 +886,7 @@ class TicketView(discord.ui.View):
             await interaction.response.send_message("❌ Defina o canal do painel primeiro!", ephemeral=True)
             return
         if not cfg.get("botoes"):
-            await interaction.response.send_message("❌ Crie pelo menos um botão antes de enviar o painel.", ephemeral=True)
+            await interaction.response.send_message("❌ Crie pelo menos uma opção antes de enviar o painel.", ephemeral=True)
             return
         canal = interaction.guild.get_channel(cfg["canal_painel"])
         if not canal:
@@ -888,6 +901,389 @@ class TicketView(discord.ui.View):
     @discord.ui.button(label="Voltar", style=discord.ButtonStyle.secondary, emoji="⬅️", row=3)
     async def voltar(self, interaction, button):
         await interaction.response.edit_message(embed=embed_painel_principal(interaction.guild, self.guild_id), view=PainelConfigView(self.guild_id))
+
+
+# ============================================================
+#  PAINEL DE CARGOS POR MENU DE SELEÇÃO
+# ============================================================
+def embed_config_painel_cargos(guild_id):
+    cfg = get_guild_config(guild_id)["painel_cargos"]
+    modos = {
+        1: "Vários cargos (adicionar/remover individualmente)",
+        2: "Apenas um cargo (troca ao selecionar outro)",
+        3: "Apenas retirar cargos"
+    }
+    canal = f"<#{cfg['canal']}>" if cfg.get("canal") else "Não definido"
+    cargos = cfg.get("cargos", [])
+    e = discord.Embed(
+        title="🎨 Configuração do painel de cargos",
+        description=(
+            "Personalize o painel que permite aos membros escolherem seus cargos.\n"
+            "Configure as opções abaixo e, quando terminar, publique o painel."
+        ),
+        color=parse_cor(cfg.get("cor_embed"))
+    )
+    e.add_field(name="📢 Canal do painel", value=canal, inline=True)
+    e.add_field(name="🎭 Cargos cadastrados", value=str(len(cargos)), inline=True)
+    e.add_field(name="⚙️ Modo de funcionamento", value=modos.get(int(cfg.get("modo", 1)), modos[1]), inline=False)
+    e.add_field(name="📝 Mensagem fora da embed", value="Configurada" if cfg.get("mensagem") else "Vazia", inline=True)
+    e.add_field(name="🖼️ Mensagem da embed", value="Configurada" if cfg.get("mensagem_embed") else "Vazia", inline=True)
+    e.add_field(name="🔻 Rodapé", value=cfg.get("rodape") or "Não definido", inline=False)
+    e.set_footer(text="As alterações são salvas automaticamente.")
+    return e
+
+
+class ModalTextoPainelCargos(discord.ui.Modal):
+    def __init__(self, guild_id, campo):
+        titulos = {
+            "mensagem": "Mensagem fora da embed",
+            "mensagem_embed": "Mensagem dentro da embed",
+            "rodape": "Personalizar rodapé"
+        }
+        super().__init__(title=titulos[campo])
+        self.guild_id = guild_id
+        self.campo = campo
+        cfg = get_guild_config(guild_id)["painel_cargos"]
+        labels = {
+            "mensagem": "Texto enviado acima da embed",
+            "mensagem_embed": "Texto exibido dentro da embed",
+            "rodape": "Texto do rodapé (opcional)"
+        }
+        self.texto = discord.ui.TextInput(
+            label=labels[campo],
+            style=discord.TextStyle.paragraph,
+            default=cfg.get(campo, "") or None,
+            placeholder="Digite o texto aqui...",
+            required=(campo != "rodape"),
+            max_length=2000 if campo != "mensagem_embed" else 4000
+        )
+        self.add_item(self.texto)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        dados = get_guild_config(self.guild_id)
+        dados["painel_cargos"][self.campo] = self.texto.value.strip()
+        update_guild_config(self.guild_id, dados)
+        await interaction.response.send_message("✅ Texto salvo com sucesso!", ephemeral=True)
+
+
+class ModalCorPainelCargos(discord.ui.Modal):
+    def __init__(self, guild_id):
+        super().__init__(title="Cor da embed")
+        self.guild_id = guild_id
+        atual = get_guild_config(guild_id)["painel_cargos"].get("cor_embed", "#5865F2")
+        self.cor = discord.ui.TextInput(
+            label="Nome da cor ou hexadecimal",
+            placeholder="Ex.: roxo, azul ou #5865F2",
+            default=str(atual),
+            max_length=20
+        )
+        self.add_item(self.cor)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        valor = self.cor.value.strip()
+        # parse_cor aceita nomes conhecidos e hexadecimal; valida o hexadecimal aqui.
+        limpo = valor.lower().replace("#", "").replace("0x", "")
+        nomes = {"amarelo", "vermelho", "verde", "azul", "roxo", "rosa", "laranja", "preto", "branco", "cinza", "ciano"}
+        if valor.lower() not in nomes:
+            try:
+                numero = int(limpo, 16)
+                if not 0 <= numero <= 0xFFFFFF:
+                    raise ValueError
+            except Exception:
+                await interaction.response.send_message("❌ Cor inválida. Use um nome conhecido ou hexadecimal, como `#5865F2`.", ephemeral=True)
+                return
+        dados = get_guild_config(self.guild_id)
+        dados["painel_cargos"]["cor_embed"] = valor
+        update_guild_config(self.guild_id, dados)
+        await interaction.response.send_message("✅ Cor da embed salva!", ephemeral=True)
+
+
+class ModalCorBotoesPainelCargos(discord.ui.Modal):
+    def __init__(self, guild_id):
+        super().__init__(title="Cor dos botões")
+        self.guild_id = guild_id
+        atual = get_guild_config(guild_id)["painel_cargos"].get("cor_botoes", "cinza")
+        self.cor = discord.ui.TextInput(
+            label="Cor (azul, verde, vermelho ou cinza)",
+            placeholder="Ex.: cinza",
+            default=str(atual),
+            max_length=20
+        )
+        self.add_item(self.cor)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        valor = self.cor.value.strip().lower()
+        if valor not in {"azul", "verde", "vermelho", "cinza"}:
+            await interaction.response.send_message("❌ Escolha azul, verde, vermelho ou cinza.", ephemeral=True)
+            return
+        dados = get_guild_config(self.guild_id)
+        dados["painel_cargos"]["cor_botoes"] = valor
+        update_guild_config(self.guild_id, dados)
+        await interaction.response.send_message(
+            "✅ Preferência salva. **Observação:** o menu de seleção do Discord tem aparência e cor controladas pelo próprio Discord; essa cor não altera o menu. Ela fica registrada caso o painel seja convertido para botões individuais.",
+            ephemeral=True
+        )
+
+
+class AdicionarCargosPainelView(discord.ui.View):
+    def __init__(self, guild_id):
+        super().__init__(timeout=120)
+        self.guild_id = guild_id
+        seletor = discord.ui.RoleSelect(
+            placeholder="Selecione até 25 cargos para o painel",
+            min_values=1,
+            max_values=25
+        )
+        seletor.callback = self.salvar
+        self.add_item(seletor)
+
+    async def salvar(self, interaction: discord.Interaction):
+        dados = get_guild_config(self.guild_id)
+        painel = dados["painel_cargos"]
+        atuais = [int(x) for x in painel.get("cargos", [])]
+        adicionados = []
+        for valor in interaction.data.get("values", []):
+            rid = int(valor)
+            if rid not in atuais:
+                atuais.append(rid)
+                adicionados.append(rid)
+        painel["cargos"] = atuais[:25]
+        update_guild_config(self.guild_id, dados)
+        nomes = [interaction.guild.get_role(rid).name for rid in adicionados if interaction.guild.get_role(rid)]
+        resumo = ", ".join(nomes) if nomes else "Nenhum cargo novo foi adicionado."
+        await interaction.response.send_message(f"✅ Cargos atualizados: {resumo}", ephemeral=True)
+
+
+class RemoverCargosPainelView(discord.ui.View):
+    def __init__(self, guild_id):
+        super().__init__(timeout=120)
+        self.guild_id = guild_id
+        ids = get_guild_config(guild_id)["painel_cargos"].get("cargos", [])
+        seletor = discord.ui.RoleSelect(
+            placeholder="Selecione os cargos que deseja remover do painel",
+            min_values=1,
+            max_values=max(1, min(25, len(ids)))
+        )
+        seletor.callback = self.remover
+        self.add_item(seletor)
+
+    async def remover(self, interaction: discord.Interaction):
+        dados = get_guild_config(self.guild_id)
+        removidos = {int(x) for x in interaction.data.get("values", [])}
+        dados["painel_cargos"]["cargos"] = [int(x) for x in dados["painel_cargos"].get("cargos", []) if int(x) not in removidos]
+        update_guild_config(self.guild_id, dados)
+        await interaction.response.send_message("✅ Cargos removidos da configuração do painel.", ephemeral=True)
+
+
+class GerenciarCargosPainelView(discord.ui.View):
+    def __init__(self, guild_id):
+        super().__init__(timeout=120)
+        self.guild_id = guild_id
+
+    @discord.ui.button(label="Adicionar cargos", style=discord.ButtonStyle.secondary, emoji="➕")
+    async def adicionar(self, interaction, button):
+        await interaction.response.send_message("Selecione os cargos que deseja adicionar:", view=AdicionarCargosPainelView(self.guild_id), ephemeral=True)
+
+    @discord.ui.button(label="Remover cargos", style=discord.ButtonStyle.secondary, emoji="➖")
+    async def remover(self, interaction, button):
+        if not get_guild_config(self.guild_id)["painel_cargos"].get("cargos"):
+            await interaction.response.send_message("Ainda não há cargos cadastrados.", ephemeral=True)
+            return
+        await interaction.response.send_message("Selecione os cargos que deseja retirar da configuração:", view=RemoverCargosPainelView(self.guild_id), ephemeral=True)
+
+
+class ModoPainelCargosSelect(discord.ui.Select):
+    def __init__(self, guild_id):
+        self.guild_id = guild_id
+        atual = int(get_guild_config(guild_id)["painel_cargos"].get("modo", 1))
+        opcoes = [
+            discord.SelectOption(label="Vários cargos", value="1", description="Pode manter vários cargos ao mesmo tempo.", default=atual == 1),
+            discord.SelectOption(label="Apenas um cargo", value="2", description="Troca o cargo atual pelo novo; clicar de novo remove.", default=atual == 2),
+            discord.SelectOption(label="Apenas tirar cargos", value="3", description="O menu só remove cargos que a pessoa já possui.", default=atual == 3)
+        ]
+        super().__init__(placeholder="Escolha o modo de funcionamento", min_values=1, max_values=1, options=opcoes)
+
+    async def callback(self, interaction: discord.Interaction):
+        dados = get_guild_config(self.guild_id)
+        dados["painel_cargos"]["modo"] = int(self.values[0])
+        update_guild_config(self.guild_id, dados)
+        await interaction.response.send_message("✅ Modo de funcionamento atualizado!", ephemeral=True)
+
+
+class ModoPainelCargosView(discord.ui.View):
+    def __init__(self, guild_id):
+        super().__init__(timeout=120)
+        self.add_item(ModoPainelCargosSelect(guild_id))
+
+
+class PainelCargosConfigView(discord.ui.View):
+    def __init__(self, guild_id):
+        super().__init__(timeout=600)
+        self.guild_id = guild_id
+
+    @discord.ui.button(label="Canal do painel", style=discord.ButtonStyle.secondary, emoji="📢", row=0)
+    async def canal(self, interaction, button):
+        await interaction.response.send_message("Selecione onde o painel será publicado:", view=SelectCanalView(self.guild_id, "painel_cargos"), ephemeral=True)
+
+    @discord.ui.button(label="Mensagem", style=discord.ButtonStyle.secondary, emoji="💬", row=0)
+    async def mensagem(self, interaction, button):
+        await interaction.response.send_modal(ModalTextoPainelCargos(self.guild_id, "mensagem"))
+
+    @discord.ui.button(label="Mensagem Embed", style=discord.ButtonStyle.secondary, emoji="🖼️", row=0)
+    async def mensagem_embed(self, interaction, button):
+        await interaction.response.send_modal(ModalTextoPainelCargos(self.guild_id, "mensagem_embed"))
+
+    @discord.ui.button(label="Cargos e seus botões", style=discord.ButtonStyle.secondary, emoji="🎭", row=1)
+    async def cargos(self, interaction, button):
+        await interaction.response.send_message("Gerencie os cargos disponíveis no menu de seleção:", view=GerenciarCargosPainelView(self.guild_id), ephemeral=True)
+
+    @discord.ui.button(label="Cor dos botões", style=discord.ButtonStyle.secondary, emoji="🎨", row=1)
+    async def cor_botoes(self, interaction, button):
+        await interaction.response.send_modal(ModalCorBotoesPainelCargos(self.guild_id))
+
+    @discord.ui.button(label="Cor da embed", style=discord.ButtonStyle.secondary, emoji="🌈", row=1)
+    async def cor_embed(self, interaction, button):
+        await interaction.response.send_modal(ModalCorPainelCargos(self.guild_id))
+
+    @discord.ui.button(label="Rodapé", style=discord.ButtonStyle.secondary, emoji="📝", row=2)
+    async def rodape(self, interaction, button):
+        await interaction.response.send_modal(ModalTextoPainelCargos(self.guild_id, "rodape"))
+
+    @discord.ui.button(label="Modo", style=discord.ButtonStyle.secondary, emoji="⚙️", row=2)
+    async def modo(self, interaction, button):
+        await interaction.response.send_message("Escolha como os cargos serão entregues:", view=ModoPainelCargosView(self.guild_id), ephemeral=True)
+
+    @discord.ui.button(label="Publicar painel", style=discord.ButtonStyle.secondary, emoji="📤", row=3)
+    async def publicar(self, interaction, button):
+        cfg = get_guild_config(self.guild_id)["painel_cargos"]
+        if not cfg.get("canal"):
+            await interaction.response.send_message("❌ Defina o canal do painel primeiro.", ephemeral=True)
+            return
+        ids = [int(x) for x in cfg.get("cargos", [])]
+        ids_validos = [rid for rid in ids if interaction.guild.get_role(rid)]
+        if not ids_validos:
+            await interaction.response.send_message("❌ Cadastre pelo menos um cargo antes de publicar.", ephemeral=True)
+            return
+        if len(ids_validos) > 25:
+            await interaction.response.send_message("❌ O painel aceita no máximo 25 cargos.", ephemeral=True)
+            return
+        canal = interaction.guild.get_channel(int(cfg["canal"]))
+        if not canal:
+            await interaction.response.send_message("❌ O canal configurado não foi encontrado.", ephemeral=True)
+            return
+        embed = discord.Embed(description=cfg.get("mensagem_embed") or None, color=parse_cor(cfg.get("cor_embed")))
+        if cfg.get("rodape"):
+            embed.set_footer(text=cfg["rodape"][:2048])
+        try:
+            await canal.send(content=cfg.get("mensagem") or None, embed=embed, view=PainelCargosPublicoView(self.guild_id))
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ Não tenho permissão para enviar mensagens ou embeds nesse canal.", ephemeral=True)
+            return
+        except discord.HTTPException as erro:
+            await interaction.response.send_message(f"❌ O Discord não aceitou o painel: {erro}", ephemeral=True)
+            return
+        await interaction.response.send_message(f"✅ Painel de cargos publicado em {canal.mention}!", ephemeral=True)
+
+    @discord.ui.button(label="Voltar", style=discord.ButtonStyle.secondary, emoji="⬅️", row=3)
+    async def voltar(self, interaction, button):
+        await interaction.response.edit_message(embed=embed_painel_principal(interaction.guild, self.guild_id), view=PainelConfigView(self.guild_id))
+
+
+class PainelCargosSelect(discord.ui.Select):
+    def __init__(self, guild_id, role_ids, menu_numero):
+        self.guild_id = guild_id
+        opcoes = []
+        guild = bot.get_guild(guild_id)
+        for rid in role_ids:
+            cargo = guild.get_role(int(rid)) if guild else None
+            if cargo and not cargo.is_default() and not cargo.managed:
+                opcoes.append(discord.SelectOption(label=cargo.name[:100], value=str(cargo.id)))
+        if not opcoes:
+            return
+        super().__init__(
+            placeholder="Faça uma seleção" if menu_numero == 1 else "Faça uma seleção (continuação)",
+            min_values=1,
+            max_values=1,
+            options=opcoes,
+            custom_id=f"ratinho_painel_cargos:{guild_id}:{menu_numero}"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await processar_selecao_cargo(interaction, self.guild_id, int(self.values[0]))
+
+
+class PainelCargosPublicoView(discord.ui.View):
+    def __init__(self, guild_id):
+        super().__init__(timeout=None)
+        cfg = get_guild_config(guild_id)["painel_cargos"]
+        guild = bot.get_guild(guild_id)
+        ids_validos = []
+        for rid in cfg.get("cargos", [])[:25]:
+            try:
+                cargo = guild.get_role(int(rid)) if guild else None
+            except (TypeError, ValueError):
+                cargo = None
+            if cargo and not cargo.is_default() and not cargo.managed:
+                ids_validos.append(cargo.id)
+
+        if ids_validos:
+            # Um único menu de seleção, com no máximo 25 opções.
+            self.add_item(PainelCargosSelect(guild_id, ids_validos, 1))
+
+
+async def processar_selecao_cargo(interaction, guild_id, role_id):
+    if interaction.guild_id != guild_id:
+        await interaction.response.send_message("❌ Este painel pertence a outro servidor.", ephemeral=True)
+        return
+    cfg = get_guild_config(guild_id)["painel_cargos"]
+    roles = [interaction.guild.get_role(int(rid)) for rid in cfg.get("cargos", [])]
+    roles = [r for r in roles if r and not r.is_default() and not r.managed]
+    if role_id == 0:
+        await interaction.response.send_message("❌ Este painel não possui cargos válidos. Peça a um administrador para configurá-lo novamente.", ephemeral=True)
+        return
+    escolhido = interaction.guild.get_role(role_id)
+    if not escolhido or escolhido not in roles:
+        await interaction.response.send_message("❌ Esse cargo não está mais disponível no painel.", ephemeral=True)
+        return
+    membro = interaction.user
+    modo = int(cfg.get("modo", 1))
+    possui = escolhido in membro.roles
+    bot_membro = interaction.guild.me
+    if not bot_membro or not bot_membro.guild_permissions.manage_roles:
+        await interaction.response.send_message("❌ Preciso da permissão **Gerenciar cargos** para entregar os cargos.", ephemeral=True)
+        return
+    if escolhido >= bot_membro.top_role:
+        await interaction.response.send_message("❌ Meu cargo mais alto precisa ficar acima do cargo selecionado.", ephemeral=True)
+        return
+    try:
+        if modo == 3:
+            if not possui:
+                await interaction.response.send_message("ℹ️ Você não possui esse cargo, então não há nada para retirar.", ephemeral=True)
+                return
+            await membro.remove_roles(escolhido, reason="Painel de cargos do Ratinho")
+            resposta = f"➖ O cargo {escolhido.mention} foi retirado."
+        elif modo == 2:
+            if possui:
+                await membro.remove_roles(escolhido, reason="Cargo removido pelo painel do Ratinho")
+                resposta = f"➖ O cargo {escolhido.mention} foi retirado."
+            else:
+                retirar = [r for r in roles if r in membro.roles and r != escolhido and r < bot_membro.top_role]
+                if retirar:
+                    await membro.remove_roles(*retirar, reason="Troca de cargo pelo painel do Ratinho")
+                await membro.add_roles(escolhido, reason="Cargo escolhido no painel do Ratinho")
+                resposta = f"✅ Seu cargo foi alterado para {escolhido.mention}."
+        else:
+            if possui:
+                await membro.remove_roles(escolhido, reason="Cargo removido pelo painel do Ratinho")
+                resposta = f"➖ O cargo {escolhido.mention} foi retirado."
+            else:
+                await membro.add_roles(escolhido, reason="Cargo escolhido no painel do Ratinho")
+                resposta = f"✅ Você recebeu o cargo {escolhido.mention}!"
+        await interaction.response.send_message(resposta, ephemeral=True)
+    except discord.Forbidden:
+        await interaction.response.send_message("❌ Não consegui alterar esse cargo. Confira a hierarquia dos cargos e minhas permissões.", ephemeral=True)
+    except discord.HTTPException:
+        await interaction.response.send_message("❌ O Discord não conseguiu atualizar seu cargo. Tente novamente.", ephemeral=True)
 
 
 class EntradaSaidaView(discord.ui.View):
@@ -1048,26 +1444,36 @@ def estilo_botao_ticket(cor):
     return estilos.get(valor, discord.ButtonStyle.secondary)
 
 
-class TicketTipoButton(discord.ui.Button):
-    def __init__(self, guild_id, dados):
+class TicketTipoSelect(discord.ui.Select):
+    def __init__(self, guild_id, tipos):
         self.guild_id = guild_id
-        self.botao_id = dados["id"]
+        opcoes = [
+            discord.SelectOption(
+                label=str(dados.get("nome", "Ticket"))[:100],
+                value=str(dados["id"]),
+                description=f"Abrir atendimento: {str(dados.get('nome', 'Ticket'))[:80]}"[:100]
+            )
+            for dados in tipos[:25]
+        ]
         super().__init__(
-            label=dados.get("nome", "Ticket")[:80],
-            style=estilo_botao_ticket(dados.get("cor")),
-            custom_id=f"ratinho_ticket:{guild_id}:{self.botao_id}"
+            placeholder="Faça uma seleção",
+            min_values=1,
+            max_values=1,
+            options=opcoes,
+            custom_id=f"ratinho_ticket_select:{guild_id}"
         )
 
     async def callback(self, interaction):
-        await abrir_ticket_tipo(interaction, self.botao_id)
+        await abrir_ticket_tipo(interaction, self.values[0])
 
 
 class TicketAbrirView(discord.ui.View):
     def __init__(self, guild_id):
         super().__init__(timeout=None)
         self.guild_id = guild_id
-        for dados in get_guild_config(guild_id)["ticket"].get("botoes", [])[:25]:
-            self.add_item(TicketTipoButton(guild_id, dados))
+        tipos = get_guild_config(guild_id)["ticket"].get("botoes", [])[:25]
+        if tipos:
+            self.add_item(TicketTipoSelect(guild_id, tipos))
 
 
 async def abrir_ticket_tipo(interaction, botao_id):
@@ -1175,6 +1581,12 @@ async def on_ready():
             bot.add_view(TicketAbrirView(guild.id))
         except Exception as e:
             print(f"Erro ao registrar painel de tickets de {guild.id}: {e}")
+        try:
+            painel_cfg = get_guild_config(guild.id)["painel_cargos"]
+            if painel_cfg.get("cargos"):
+                bot.add_view(PainelCargosPublicoView(guild.id))
+        except Exception as e:
+            print(f"Erro ao registrar painel de cargos de {guild.id}: {e}")
         await atualizar_cache_convites(guild)
     try:
         synced = await bot.tree.sync()
@@ -2617,6 +3029,33 @@ async def clear_error(ctx, error):
             await ctx.send(mensagem, delete_after=10)
     except discord.HTTPException as erro:
         print(f"Não foi possível enviar o erro do clear: {erro}")
+
+@bot.hybrid_command(
+    name="painel-cargos",
+    description="Abre a configuração do painel de cargos (só ADM)"
+)
+@app_commands.default_permissions(administrator=True)
+@commands.has_permissions(administrator=True)
+async def painel_cargos(ctx):
+    if ctx.guild is None:
+        await ctx.send("❌ Use esse comando dentro de um servidor!", ephemeral=True)
+        return
+    if not ctx.author.guild_permissions.administrator:
+        await ctx.send("❌ Você precisa ser administrador!", ephemeral=True)
+        return
+    await ctx.send(embed=embed_config_painel_cargos(ctx.guild.id), view=PainelCargosConfigView(ctx.guild.id))
+
+@painel_cargos.error
+async def painel_cargos_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ Você precisa ser administrador para configurar o painel de cargos!", ephemeral=True)
+    else:
+        print(f"Erro no comando painel-cargos: {error}")
+        try:
+            await ctx.send("❌ Ocorreu um erro ao abrir a configuração do painel de cargos.", ephemeral=True)
+        except Exception:
+            pass
+
 
 @bot.hybrid_command(
     name="configurar",
