@@ -213,7 +213,7 @@ def get_guild_config(guild_id):
     # Painel independente de cargos por menu de seleção.
     painel_cargos = dados[gid].setdefault("painel_cargos", {})
     painel_cargos.setdefault("canal", None)
-    painel_cargos.setdefault("mensagem", "Escolha abaixo os cargos que deseja receber.")
+    painel_cargos.setdefault("mensagem", "")
     painel_cargos.setdefault("mensagem_embed", "")
     painel_cargos.setdefault("cargos", [])
     painel_cargos.setdefault("cor_embed", "#5865F2")
@@ -954,7 +954,7 @@ class ModalTextoPainelCargos(discord.ui.Modal):
             style=discord.TextStyle.paragraph,
             default=cfg.get(campo, "") or None,
             placeholder="Digite o texto aqui...",
-            required=(campo != "rodape"),
+            required=False,
             max_length=2000 if campo != "mensagem_embed" else 4000
         )
         self.add_item(self.texto)
@@ -1125,11 +1125,11 @@ class PainelCargosConfigView(discord.ui.View):
     async def canal(self, interaction, button):
         await interaction.response.send_message("Selecione onde o painel será publicado:", view=SelectCanalView(self.guild_id, "painel_cargos"), ephemeral=True)
 
-    @discord.ui.button(label="Mensagem", style=discord.ButtonStyle.secondary, emoji="💬", row=0)
+    @discord.ui.button(label="Mensagem (opcional)", style=discord.ButtonStyle.secondary, emoji="💬", row=0)
     async def mensagem(self, interaction, button):
         await interaction.response.send_modal(ModalTextoPainelCargos(self.guild_id, "mensagem"))
 
-    @discord.ui.button(label="Mensagem Embed", style=discord.ButtonStyle.secondary, emoji="🖼️", row=0)
+    @discord.ui.button(label="Mensagem Embed (opcional)", style=discord.ButtonStyle.secondary, emoji="🖼️", row=0)
     async def mensagem_embed(self, interaction, button):
         await interaction.response.send_modal(ModalTextoPainelCargos(self.guild_id, "mensagem_embed"))
 
