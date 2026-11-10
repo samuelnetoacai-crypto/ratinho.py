@@ -375,18 +375,43 @@ bot = commands.Bot(
 
 # Cache local dos convites para identificar quem trouxe cada novo membro.
 convites_cache = {}
+convites_detalhes_cache = {}
+convites_locks = {}
+convites_ultima_consulta = {}
+INTERVALO_MINIMO_CONVITES = 3.0
 
 
-async def atualizar_cache_convites(guild):
-    """Atualiza os usos dos convites; requer permissão para gerenciar convites."""
-    try:
-        convites = await guild.invites()
-        convites_cache[guild.id] = {
-            convite.code: convite.uses or 0 for convite in convites
-        }
-    except (discord.Forbidden, discord.HTTPException) as erro:
-        print(f"Não foi possível consultar convites de {guild.name}: {erro}")
-        convites_cache.pop(guild.id, None)
+async def atualizar_cache_convites(guild, force=False):
+    """Atualiza os convites com trava e intervalo para evitar consultas repetidas."""
+    lock = convites_locks.setdefault(guild.id, asyncio.Lock())
+
+    async with lock:
+        agora = time.monotonic()
+        ultima = convites_ultima_consulta.get(guild.id, 0.0)
+
+        # Evita várias chamadas à API quando vários membros entram juntos.
+        if not force and agora - ultima < INTERVALO_MINIMO_CONVITES:
+            return False
+
+        # Registra antes da chamada para também limitar tentativas após erro/429.
+        convites_ultima_consulta[guild.id] = agora
+
+        try:
+            convites = await guild.invites()
+            convites_cache[guild.id] = {
+                convite.code: convite.uses or 0 for convite in convites
+            }
+            convites_detalhes_cache[guild.id] = {
+                convite.code: convite for convite in convites
+            }
+            return True
+        except (discord.Forbidden, discord.HTTPException) as erro:
+            print(f"Não foi possível consultar convites de {guild.name}: {erro}")
+            # Não apaga o último cache válido: ele ainda pode ajudar na próxima entrada.
+            return False
+        except Exception as erro:
+            print(f"Erro inesperado ao consultar convites de {guild.name}: {erro}")
+            return False
 
 
 # ============================================================
@@ -1620,37 +1645,64 @@ async def enviar_log(guild, titulo, desc, cor=COR_INFO):
     except:
         pass
 
+# O evento on_ready pode acontecer novamente após uma reconexão.
+# Esta trava evita registrar views e sincronizar comandos repetidamente.
+_ratinho_inicializado = False
+
+
 @bot.event
 async def on_ready():
+    global _ratinho_inicializado
+
     print(f"Logado como {bot.user}")
-    bot.add_view(TicketFecharView())
-    for guild in bot.guilds:
+
+    if not _ratinho_inicializado:
+        _ratinho_inicializado = True
+
+        bot.add_view(TicketFecharView())
+        for guild in bot.guilds:
+            try:
+                bot.add_view(TicketAbrirView(guild.id))
+            except Exception as e:
+                print(f"Erro ao registrar painel de tickets de {guild.id}: {e}")
+            try:
+                painel_cfg = get_guild_config(guild.id)["painel_cargos"]
+                if painel_cfg.get("cargos"):
+                    bot.add_view(PainelCargosPublicoView(guild.id))
+            except Exception as e:
+                print(f"Erro ao registrar painel de cargos de {guild.id}: {e}")
+
+        # Faz uma consulta inicial por servidor, em sequência, com pequeno intervalo.
+        for indice, guild in enumerate(bot.guilds):
+            await atualizar_cache_convites(guild, force=True)
+            if indice < len(bot.guilds) - 1:
+                await asyncio.sleep(1.5)
+
+        # Sincroniza os comandos slash apenas uma vez por execução do processo.
         try:
-            bot.add_view(TicketAbrirView(guild.id))
+            synced = await bot.tree.sync()
+            print(f"Sincronizados {len(synced)} comandos slash!")
+        except discord.HTTPException as e:
+            print(f"Erro HTTP ao sincronizar slash: {e}")
         except Exception as e:
-            print(f"Erro ao registrar painel de tickets de {guild.id}: {e}")
-        try:
-            painel_cfg = get_guild_config(guild.id)["painel_cargos"]
-            if painel_cfg.get("cargos"):
-                bot.add_view(PainelCargosPublicoView(guild.id))
-        except Exception as e:
-            print(f"Erro ao registrar painel de cargos de {guild.id}: {e}")
-        await atualizar_cache_convites(guild)
+            print(f"Erro ao sincronizar slash: {e}")
+    else:
+        print("Reconexão detectada: inicialização e sincronização ignoradas.")
+
     try:
-        synced = await bot.tree.sync()
-        print(f"Sincronizados {len(synced)} comandos slash!")
-    except Exception as e:
-        print(f"Erro ao sincronizar slash: {e}")
-    await bot.change_presence(
-        status=discord.Status.idle,
-        activity=discord.CustomActivity(
-            name=f"Atualmente estou em {len(bot.guilds)} servidores!"
+        await bot.change_presence(
+            status=discord.Status.idle,
+            activity=discord.CustomActivity(
+                name=f"Atualmente estou em {len(bot.guilds)} servidores!"
+            )
         )
-    )
+    except discord.HTTPException as e:
+        print(f"Não foi possível atualizar a presença agora: {e}")
+
 
 @bot.event
 async def on_guild_join(guild):
-    await atualizar_cache_convites(guild)
+    await atualizar_cache_convites(guild, force=True)
     await bot.change_presence(
         status=discord.Status.idle,
         activity=discord.CustomActivity(
@@ -1681,16 +1733,15 @@ async def on_invite_delete(invite):
 async def on_member_join(member):
     convite_usado = None
     try:
-        convites_atuais = await member.guild.invites()
-        cache_anterior = convites_cache.get(member.guild.id, {})
-        for convite in convites_atuais:
-            if (convite.uses or 0) > cache_anterior.get(convite.code, 0):
-                convite_usado = convite
-                break
-        convites_cache[member.guild.id] = {
-            convite.code: convite.uses or 0 for convite in convites_atuais
-        }
-    except (discord.Forbidden, discord.HTTPException) as erro:
+        cache_anterior = convites_cache.get(member.guild.id, {}).copy()
+        atualizou = await atualizar_cache_convites(member.guild)
+        if atualizou:
+            cache_atual = convites_cache.get(member.guild.id, {})
+            for codigo, usos in cache_atual.items():
+                if usos > cache_anterior.get(codigo, 0):
+                    convite_usado = convites_detalhes_cache.get(member.guild.id, {}).get(codigo)
+                    break
+    except Exception as erro:
         print(f"Não foi possível identificar o convite usado em {member.guild.name}: {erro}")
 
     cfg = get_guild_config(member.guild.id)
