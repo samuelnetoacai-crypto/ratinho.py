@@ -1235,43 +1235,77 @@ async def processar_selecao_cargo(interaction, guild_id, role_id):
     if interaction.guild_id != guild_id:
         await interaction.response.send_message("❌ Este painel pertence a outro servidor.", ephemeral=True)
         return
+
     cfg = get_guild_config(guild_id)["painel_cargos"]
     roles = [interaction.guild.get_role(int(rid)) for rid in cfg.get("cargos", [])]
     roles = [r for r in roles if r and not r.is_default() and not r.managed]
+
     if role_id == 0:
-        await interaction.response.send_message("❌ Este painel não possui cargos válidos. Peça a um administrador para configurá-lo novamente.", ephemeral=True)
+        await interaction.response.send_message(
+            "❌ Este painel não possui cargos válidos. Peça a um administrador para configurá-lo novamente.",
+            ephemeral=True
+        )
         return
+
     escolhido = interaction.guild.get_role(role_id)
     if not escolhido or escolhido not in roles:
-        await interaction.response.send_message("❌ Esse cargo não está mais disponível no painel.", ephemeral=True)
+        await interaction.response.send_message(
+            "❌ Esse cargo não está mais disponível no painel.",
+            ephemeral=True
+        )
         return
+
     membro = interaction.user
     modo = int(cfg.get("modo", 1))
     possui = escolhido in membro.roles
     bot_membro = interaction.guild.me
+
     if not bot_membro or not bot_membro.guild_permissions.manage_roles:
-        await interaction.response.send_message("❌ Preciso da permissão **Gerenciar cargos** para entregar os cargos.", ephemeral=True)
+        await interaction.response.send_message(
+            "❌ Preciso da permissão **Gerenciar cargos** para entregar os cargos.",
+            ephemeral=True
+        )
         return
+
     if escolhido >= bot_membro.top_role:
-        await interaction.response.send_message("❌ Meu cargo mais alto precisa ficar acima do cargo selecionado.", ephemeral=True)
+        await interaction.response.send_message(
+            "❌ Meu cargo mais alto precisa ficar acima do cargo selecionado.",
+            ephemeral=True
+        )
         return
+
+    # Confirma a interação antes de chamar a API do Discord para alterar cargos.
+    # Isso evita o erro "Esta interação não respondeu" quando a API demora.
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
     try:
         if modo == 3:
             if not possui:
-                await interaction.response.send_message("ℹ️ Você não possui esse cargo, então não há nada para retirar.", ephemeral=True)
-                return
-            await membro.remove_roles(escolhido, reason="Painel de cargos do Ratinho")
-            resposta = f"➖ O cargo {escolhido.mention} foi retirado."
+                resposta = "ℹ️ Você não possui esse cargo, então não há nada para retirar."
+            else:
+                await membro.remove_roles(escolhido, reason="Painel de cargos do Ratinho")
+                resposta = f"➖ O cargo {escolhido.mention} foi retirado."
+
         elif modo == 2:
             if possui:
                 await membro.remove_roles(escolhido, reason="Cargo removido pelo painel do Ratinho")
                 resposta = f"➖ O cargo {escolhido.mention} foi retirado."
             else:
-                retirar = [r for r in roles if r in membro.roles and r != escolhido and r < bot_membro.top_role]
+                retirar = [
+                    r for r in roles
+                    if r in membro.roles and r != escolhido and r < bot_membro.top_role
+                ]
                 if retirar:
-                    await membro.remove_roles(*retirar, reason="Troca de cargo pelo painel do Ratinho")
-                await membro.add_roles(escolhido, reason="Cargo escolhido no painel do Ratinho")
+                    await membro.remove_roles(
+                        *retirar,
+                        reason="Troca de cargo pelo painel do Ratinho"
+                    )
+                await membro.add_roles(
+                    escolhido,
+                    reason="Cargo escolhido no painel do Ratinho"
+                )
                 resposta = f"✅ Seu cargo foi alterado para {escolhido.mention}."
+
         else:
             if possui:
                 await membro.remove_roles(escolhido, reason="Cargo removido pelo painel do Ratinho")
@@ -1279,11 +1313,25 @@ async def processar_selecao_cargo(interaction, guild_id, role_id):
             else:
                 await membro.add_roles(escolhido, reason="Cargo escolhido no painel do Ratinho")
                 resposta = f"✅ Você recebeu o cargo {escolhido.mention}!"
-        await interaction.response.send_message(resposta, ephemeral=True)
+
+        await interaction.followup.send(resposta, ephemeral=True)
+
     except discord.Forbidden:
-        await interaction.response.send_message("❌ Não consegui alterar esse cargo. Confira a hierarquia dos cargos e minhas permissões.", ephemeral=True)
+        await interaction.followup.send(
+            "❌ Não consegui alterar esse cargo. Confira a hierarquia dos cargos e minhas permissões.",
+            ephemeral=True
+        )
     except discord.HTTPException:
-        await interaction.response.send_message("❌ O Discord não conseguiu atualizar seu cargo. Tente novamente.", ephemeral=True)
+        await interaction.followup.send(
+            "❌ O Discord não conseguiu atualizar seu cargo. Tente novamente.",
+            ephemeral=True
+        )
+    except Exception as erro:
+        print(f"Erro ao processar seleção de cargo: {erro}")
+        await interaction.followup.send(
+            "❌ Ocorreu um erro inesperado ao alterar seu cargo. Avise a equipe do servidor.",
+            ephemeral=True
+        )
 
 
 class EntradaSaidaView(discord.ui.View):
@@ -1919,12 +1967,27 @@ def bj_comprar():
     return random.randint(1, 13)
 
 def bj_nome_carta(carta):
-    # Exibe apenas números: Ás como 1 e figuras como 10.
+    # O Ás pode valer 1 ou 11 no Blackjack.
+    if carta == 1:
+        return "1/11"
     return str(10 if carta >= 10 else carta)
 
 def bj_mostrar_mao(mao):
-    total = bj_total(mao)
-    total_formatado = f"~~({total})~~" if total > 21 else f"({total})"
+    # Mostra as duas possibilidades do total quando há Ás:
+    # primeiro o total contando o Ás como 11, depois como 1.
+    total_alto = sum(bj_valor_carta(c) for c in mao)
+    total_baixo = total_alto - (10 * mao.count(1))
+
+    if mao.count(1):
+        if total_alto > 21 and total_baixo <= 21:
+            total_formatado = f"(~~{total_alto}~~/{total_baixo})"
+        elif total_baixo > 21:
+            total_formatado = f"(~~{total_alto}/{total_baixo}~~)"
+        else:
+            total_formatado = f"({total_alto}/{total_baixo})"
+    else:
+        total_formatado = f"~~({total_baixo})~~" if total_baixo > 21 else f"({total_baixo})"
+
     return " · ".join(bj_nome_carta(c) for c in mao) + f"  {total_formatado}"
 
 def bj_parse_valor(texto):
